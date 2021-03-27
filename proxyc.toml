@@ -1,0 +1,6 @@
+chain_type = "Stric"
+
+[[proxy]]
+type = "Raw"
+ip = "127.0.0.1"
+port = 8080

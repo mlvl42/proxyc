@@ -1,0 +1,28 @@
+[package]
+name = "proxyc"
+version = "0.1.0"
+authors = ["j3d42 <melvil.guillaume@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cstr = "0.2"
+log = "0.4"
+nix = "0.20"
+once_cell = "1.7"
+pretty_env_logger = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+socks = "0.3.3"
+structopt = "0.3"
+toml = "0.5"
+thiserror = "1.0"
+anyhow = "1.0"
+
+# [lib]
+# crate-type = ["cdylib"]
+# path = "src/libproxyc.rs"
+#
+# [[bin]]
+# name = "proxyc"
+# path = "src/main.rs"
