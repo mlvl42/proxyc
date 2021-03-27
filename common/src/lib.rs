@@ -1,8 +1,20 @@
-use serde::Deserialize;
+use log::LevelFilter;
+use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(remote = "LevelFilter")]
+enum LevelFilterRef {
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ProxyType {
     Raw,
     Http,
@@ -10,14 +22,14 @@ pub enum ProxyType {
     Socks5,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ChainType {
     Strict,
     Dynamic,
     Random,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ProxyConf {
     #[serde(rename = "type")]
     pub proto: ProxyType,
@@ -25,11 +37,13 @@ pub struct ProxyConf {
     pub port: u16,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ProxycConfig {
     #[serde(rename = "proxy")]
     pub proxies: Vec<ProxyConf>,
     pub chain_type: ChainType,
+    #[serde(with = "LevelFilterRef")]
+    pub log_level: LevelFilter,
     pub tcp_read_timeout: Option<usize>,
     pub tcp_connect_timeout: Option<usize>,
 }
@@ -41,5 +55,15 @@ impl ProxycConfig {
         file.read_to_string(&mut contents)?;
         let config: ProxycConfig = toml::from_str(&contents)?;
         Ok(config)
+    }
+
+    pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+        let content = std::env::var("PROXYC_CONFIG")?;
+        let config: ProxycConfig = serde_json::from_str(&content)?;
+        Ok(config)
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }

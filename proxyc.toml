@@ -1,6 +1,7 @@
-chain_type = "Stric"
+log_level = "Off"
+chain_type = "Strict"
 
 [[proxy]]
-type = "Raw"
+type = "Socks5"
 ip = "127.0.0.1"
-port = 8080
+port = 1080

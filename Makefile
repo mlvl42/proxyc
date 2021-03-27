@@ -1,14 +1,12 @@
-test:
-	echo "YO" | LD_PRELOAD=./target/debug/libproxyc.so nc -c 127.0.0.1 8080
-
-test_noob:
-	#cargo build
-	cp ./target/debug/libproxyc.so ./target/debug/libgreet.so
-	gcc -Wall -shared badgreet.c -o libgreet.so
-	gcc -Wall main.c -lgreet -L ./
-	LD_LIBRARY_PATH=. LD_PRELOAD=./target/debug/libproxyc.so ./a.out
+.PHONY: all clean
+# We can't yet depend on a cdylib:
+# https://github.com/rust-lang/cargo/issues/8311
+# https://github.com/rust-lang/cargo/issues/7825
+# So let's build crates manually.
+all:
+	cargo build -p libproxyc
+	cargo build
 
 clean:
-	rm -f *.o
-	rm -f *.so
-	rm -f a.out
+	cargo clean -p libproxyc
+	cargo clean

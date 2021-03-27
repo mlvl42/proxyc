@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use proxyc::config::ProxycConfig;
+use proxyc_common::ProxycConfig;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use structopt::clap::AppSettings;
@@ -16,7 +16,7 @@ struct ProxycOpt {
     #[structopt(short, long)]
     fixme: Option<String>,
 
-    /// hook me bebprogram to hook
+    /// the command line to hook
     args: Vec<String>,
 }
 
@@ -38,16 +38,18 @@ fn main() -> Result<()> {
         .and_then(|x| x)
         .ok_or(anyhow!("proxyc.toml file not found"))?;
 
-    println!("config: {:?}", config_path);
+    println!("config path: {:?}", config_path);
 
     // try to parse the config before actually passing it down the shared
     // library.
     let config =
         ProxycConfig::new(&config_path).map_err(|e| anyhow!("invalid configuration: {:?}", e))?;
-    println!("{:?}", config);
+
+    let config_env = config.to_json()?;
 
     // TODO
     // - get .so dynamically ?
+    // - pass args as env ?
     Ok(match program {
         Some(x) => {
             Command::new(&x)
@@ -56,6 +58,7 @@ fn main() -> Result<()> {
                     "LD_PRELOAD",
                     "/home/jed/projects/proxyc/target/debug/libproxyc.so",
                 )
+                .env("PROXYC_CONFIG", config_env)
                 .exec();
         }
         None => {
