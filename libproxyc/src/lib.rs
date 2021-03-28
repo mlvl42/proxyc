@@ -396,5 +396,9 @@ extern "C" fn init() {
 
     pretty_env_logger::init();
 
-    debug!("config: {:?}", config);
+    debug!("chain_type: {:?}", config.chain_type);
+    debug!("proxies:");
+    for p in &config.proxies {
+        debug!("\t{}", p);
+    }
 }

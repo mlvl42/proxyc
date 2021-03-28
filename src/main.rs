@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use proxyc_common::ProxycConfig;
+use log::LevelFilter;
+use proxyc_common::{ChainType, ProxyConf, ProxycConfig};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use structopt::clap::AppSettings;
@@ -12,9 +13,17 @@ use structopt::StructOpt;
     setting = AppSettings::TrailingVarArg
 )]
 struct ProxycOpt {
-    /// a sample option
+    /// proxy definition
     #[structopt(short, long)]
-    fixme: Option<String>,
+    proxy: Vec<ProxyConf>,
+
+    /// log level
+    #[structopt(rename_all = "lowercase", short, long)]
+    log_level: Option<LevelFilter>,
+
+    /// chain type
+    #[structopt(short, long)]
+    chain: Option<ChainType>,
 
     /// the command line to hook
     args: Vec<String>,
@@ -38,18 +47,33 @@ fn main() -> Result<()> {
         .and_then(|x| x)
         .ok_or(anyhow!("proxyc.toml file not found"))?;
 
-    println!("config path: {:?}", config_path);
+    // parse the config before passing it down the shared library through the
+    // environment
+    let config = {
+        let mut config = ProxycConfig::new(&config_path)
+            .map_err(|e| anyhow!("invalid configuration: {:?}", e))?;
 
-    // try to parse the config before actually passing it down the shared
-    // library.
-    let config =
-        ProxycConfig::new(&config_path).map_err(|e| anyhow!("invalid configuration: {:?}", e))?;
+        // enrich config with values provided in command line
+        if opts.proxy.len() > 0 {
+            config.proxies = opts.proxy;
+        }
 
+        if let Some(level) = opts.log_level {
+            config.log_level = level;
+        }
+
+        if let Some(chain) = opts.chain {
+            config.chain_type = chain;
+        }
+
+        config
+    };
+
+    // pass config in env variable
     let config_env = config.to_json()?;
 
     // TODO
     // - get .so dynamically ?
-    // - pass args as env ?
     Ok(match program {
         Some(x) => {
             Command::new(&x)
