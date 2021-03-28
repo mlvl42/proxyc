@@ -5,6 +5,7 @@ use std::io;
 use std::io::Read;
 use std::path::PathBuf;
 use std::str::FromStr;
+use thiserror::Error;
 use url::Url;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,7 +59,7 @@ pub struct ProxyConf {
 }
 
 impl FromStr for ProxyConf {
-    type Err = io::Error;
+    type Err = ConfigError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let url = Url::parse(s).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -68,19 +69,23 @@ impl FromStr for ProxyConf {
             "socks5" => ProxyType::Socks5,
             "http" => ProxyType::Http,
             "raw" => ProxyType::Raw,
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "scheme not handled")),
+            _ => {
+                return Err(ConfigError::ParseError(format!(
+                    "scheme {:?} not handled",
+                    url.scheme()
+                )))
+            }
         };
 
         let ip = url
             .host()
-            .ok_or("missing host")
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        let ip = std::net::IpAddr::from_str(&ip.to_string())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .ok_or(ConfigError::ParseError("missing host".into()))?;
+        let ip = std::net::IpAddr::from_str(&ip.to_string()).map_err(|_| {
+            ConfigError::ParseError(format!("invalid ip address {:?}", &ip.to_string()))
+        })?;
         let port = url
             .port()
-            .ok_or("missing port")
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .ok_or(ConfigError::ParseError("missing port".into()))?;
 
         Ok(ProxyConf { proto, ip, port })
     }
@@ -104,6 +109,20 @@ impl fmt::Display for ProxyConf {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error("parse error: {0}")]
+    ParseError(String),
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error("toml error")]
+    TomlError(#[from] toml::de::Error),
+    #[error(transparent)]
+    JsonError(#[from] serde_json::Error),
+    #[error("missing environment variable: {0}")]
+    MissingEnv(String),
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProxycConfig {
     #[serde(rename = "proxy")]
@@ -116,7 +135,7 @@ pub struct ProxycConfig {
 }
 
 impl ProxycConfig {
-    pub fn new(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(path: &PathBuf) -> Result<Self, ConfigError> {
         let mut file = std::fs::File::open(path)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
@@ -124,13 +143,14 @@ impl ProxycConfig {
         Ok(config)
     }
 
-    pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
-        let content = std::env::var("PROXYC_CONFIG")?;
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let content = std::env::var("PROXYC_CONFIG")
+            .map_err(|_| ConfigError::MissingEnv("PROXYC_CONFIG".into()))?;
         let config: ProxycConfig = serde_json::from_str(&content)?;
         Ok(config)
     }
 
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(self)
+    pub fn to_json(&self) -> Result<String, ConfigError> {
+        Ok(serde_json::to_string(self)?)
     }
 }

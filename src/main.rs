@@ -50,8 +50,7 @@ fn main() -> Result<()> {
     // parse the config before passing it down the shared library through the
     // environment
     let config = {
-        let mut config = ProxycConfig::new(&config_path)
-            .map_err(|e| anyhow!("invalid configuration: {:?}", e))?;
+        let mut config = ProxycConfig::new(&config_path)?;
 
         // enrich config with values provided in command line
         if opts.proxy.len() > 0 {

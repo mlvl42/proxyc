@@ -17,7 +17,8 @@ use std::io;
 use std::io::Write;
 use std::os::unix::io::RawFd;
 
-static CONFIG: Lazy<ProxycConfig> = Lazy::new(|| ProxycConfig::from_env().unwrap());
+static CONFIG: Lazy<ProxycConfig> =
+    Lazy::new(|| ProxycConfig::from_env().expect("failed to parse config"));
 
 /// Converts a value from host byte order to network byte order.
 pub fn htons(u: u16) -> u16 {
