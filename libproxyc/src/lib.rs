@@ -123,19 +123,7 @@ fn write_addr(
             packet.write_u8(4).unwrap();
             packet.write_all(&addr.octets()).unwrap();
             packet.write_u16::<BigEndian>(target.port).unwrap();
-        } // FIXME
-          // TargetAddr::Domain(ref domain, port) => {
-          //     packet.write_u8(3).unwrap();
-          //     if domain.len() > u8::max_value() as usize {
-          //         return Err(io::Error::new(
-          //             io::ErrorKind::InvalidInput,
-          //             "domain name too long",
-          //         ));
-          //     }
-          //     packet.write_u8(domain.len() as u8).unwrap();
-          //     packet.write_all(domain.as_bytes()).unwrap();
-          //     packet.write_u16::<BigEndian>(port).unwrap();
-          // }
+        }
     }
     Ok(start_len - packet.len())
 }
@@ -149,9 +137,99 @@ fn chain_step(
 
     match from.proto {
         ProxyType::Raw => Ok(()),
-        ProxyType::Socks5 => {
-            // TODO handle auth
+        ProxyType::Http => {
+            let ip = match to.ip {
+                std::net::IpAddr::V4(addr) => addr.to_string(),
+                std::net::IpAddr::V6(addr) => addr.to_string(),
+            };
 
+            let packet = format!("CONNECT {}:{} HTTP/1.0\r\n\r\n", ip, to.port);
+            let packet = packet.as_bytes();
+            send(sock, &packet, flags)?;
+
+            let mut len = 0;
+            let mut buf = [0; 1024];
+            while len < 1024 {
+                recv_exact(sock, &mut buf[len..len + 1])?;
+                len += 1;
+                if len > 4
+                    && (buf[len - 1] == b'\n'
+                        && buf[len - 2] == b'\r'
+                        && buf[len - 3] == b'\n'
+                        && buf[len - 4] == b'\r')
+                {
+                    break;
+                }
+            }
+
+            if len == 1024 || !(buf[9] == b'2' && buf[10] == b'0' && buf[11] == b'0') {
+                return Err(io::Error::new(io::ErrorKind::Other, "HTTP proxy blocked").into());
+            }
+
+            Ok(())
+        }
+        ProxyType::Socks4 => {
+            let mut packet = vec![];
+
+            let _ = packet.write_u8(4); // version
+            let _ = packet.write_u8(1); // connect
+
+            // TODO handle auth and proxy dns
+
+            match to.ip {
+                std::net::IpAddr::V4(addr) => {
+                    packet.write_u16::<BigEndian>(to.port)?;
+                    packet.write_u32::<BigEndian>(addr.into())?;
+                    // write user here
+                    packet.write_u8(0)?;
+                }
+                _ => return Err("address family not supported by socks4".into()),
+            }
+
+            send(sock, &packet, flags)?;
+
+            let mut buf = [0; 8];
+            recv_exact(sock, &mut buf)?;
+
+            if buf[0] != 0 {
+                return Err(
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid response version").into(),
+                );
+            }
+
+            match buf[1] {
+                90 => {}
+                91 => {
+                    return Err(
+                        io::Error::new(io::ErrorKind::Other, "request rejected or failed").into(),
+                    )
+                }
+                92 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "request rejected because SOCKS server cannot connect to \
+                                       idnetd on the client",
+                    )
+                    .into())
+                }
+                93 => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "request rejected because the client program and identd \
+                                       report different user-ids",
+                    )
+                    .into())
+                }
+                _ => {
+                    return Err(
+                        io::Error::new(io::ErrorKind::InvalidData, "invalid response code").into(),
+                    )
+                }
+            }
+
+            Ok(())
+        }
+        ProxyType::Socks5 => {
             let packet = [
                 5, // version
                 1, // methods
@@ -178,7 +256,6 @@ fn chain_step(
             }
 
             let mut packet = [0; 264];
-            // FIXME still needed ?
             packet[0] = 5; // protocol version
             packet[1] = 1; // connect
             packet[2] = 0; // reserved
@@ -192,11 +269,9 @@ fn chain_step(
 
             Ok(())
         }
-        _ => Err("protocol not handled".into()),
     }
 }
 
-// TODO handle socks
 // TODO handle ipv6
 fn connect_proxyc(sock: RawFd, target: &SockAddr) -> Result<(), Box<dyn std::error::Error>> {
     let config = &*CONFIG;
@@ -257,7 +332,6 @@ fn connect_proxyc(sock: RawFd, target: &SockAddr) -> Result<(), Box<dyn std::err
             };
 
             for (p1, p2) in proxies {
-                debug!("current proxies: {:?}, {:?}", p1, p2);
                 let to = p2.unwrap();
                 match p1 {
                     None => chain_start(ns, to)?,

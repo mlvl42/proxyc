@@ -1,7 +1,12 @@
-log_level = "Off"
-chain_type = "Strict"
+log_level = "debug"
+chain_type = "strict"
+
+# [[proxy]]
+# type = "http"
+# ip = "127.0.0.1"
+# port = 8888
 
 [[proxy]]
-type = "Socks5"
+type = "socks4"
 ip = "127.0.0.1"
 port = 1080

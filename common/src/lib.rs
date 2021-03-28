@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "LevelFilter")]
+#[serde(rename_all = "lowercase")]
 enum LevelFilterRef {
     Off,
     Error,
@@ -15,6 +16,7 @@ enum LevelFilterRef {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ProxyType {
     Raw,
     Http,
@@ -23,6 +25,7 @@ pub enum ProxyType {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ChainType {
     Strict,
     Dynamic,
