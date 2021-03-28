@@ -31,13 +31,29 @@ struct ProxycOpt {
 
 const CONFIG_FILE_PATHS: [&str; 3] = ["./proxyc.toml", "~/proxyc.toml", "/etc/proxyc/proxyc.toml"];
 
+// search the debug libproxyc.so in the current directory if proxyc is compiled
+// in debug profile.
+// This allows "cargo run" to work and eases testing.
+#[cfg(debug_assertions)]
+const SHARED_LIB_PATHS: [&str; 2] = ["./target/debug/libproxyc.so", "/usr/lib/libproxyc.so"];
+#[cfg(not(debug_assertions))]
+const SHARED_LIB_PATHS: [&str; 1] = ["/usr/lib/libproxyc.so"];
+
 fn main() -> Result<()> {
     let opts = ProxycOpt::from_args();
 
     let program = opts.args.iter().next();
     let args = opts.args.iter().skip(1);
 
-    // TODO check provided conf file
+    // TODO check provided conf file via argument
+
+    // find libproxyc.so
+    let lib_path = SHARED_LIB_PATHS
+        .iter()
+        .find(|x| std::fs::metadata(x).is_ok())
+        .map(|x| std::fs::canonicalize(x).ok())
+        .and_then(|x| x)
+        .ok_or(anyhow!("libproxyc.so not found"))?;
 
     // no files provided, try to find one
     let config_path = CONFIG_FILE_PATHS
@@ -77,10 +93,7 @@ fn main() -> Result<()> {
         Some(x) => {
             Command::new(&x)
                 .args(args)
-                .env(
-                    "LD_PRELOAD",
-                    "/home/jed/projects/proxyc/target/debug/libproxyc.so",
-                )
+                .env("LD_PRELOAD", lib_path)
                 .env("PROXYC_CONFIG", config_env)
                 .exec();
         }
