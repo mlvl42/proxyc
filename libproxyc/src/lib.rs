@@ -5,12 +5,12 @@ extern crate pretty_env_logger;
 mod core;
 
 use byteorder::{BigEndian, WriteBytesExt};
+use nix::errno::Errno;
 use nix::libc::{c_int, sockaddr, socklen_t};
 use nix::sys::socket::{
-    getsockopt, recv, send, socket, sockopt, AddressFamily, InetAddr, IpAddr, MsgFlags, SockAddr,
-    SockFlag, SockType,
+    getsockopt, socket, sockopt, AddressFamily, InetAddr, IpAddr, SockAddr, SockFlag, SockType,
 };
-use nix::unistd::{close, dup2};
+use nix::unistd::{close, dup2, read, write};
 use once_cell::sync::Lazy;
 use proxyc_common::{ChainType, ProxyConf, ProxyType, ProxycConfig};
 use std::io;
@@ -42,32 +42,18 @@ pub fn ntohl(u: u32) -> u32 {
 }
 
 fn chain_start(sock: RawFd, proxy: &ProxyConf) -> Result<(), Box<dyn std::error::Error>> {
-    let target = SockAddr::new_inet(InetAddr::new(IpAddr::from_std(&proxy.ip), proxy.port));
-    core::connect(sock, &target)?;
-    Ok(())
-}
+    let config = &*CONFIG;
 
-fn recv_exact(sock: RawFd, mut buf: &mut [u8]) -> Result<(), Box<dyn std::error::Error>> {
-    while !buf.is_empty() {
-        match recv(sock, buf, MsgFlags::empty()) {
-            Ok(0) => break,
-            Ok(n) => {
-                let tmp = buf;
-                buf = &mut tmp[n..];
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-    if !buf.is_empty() {
-        Err("failed to fill whole buffer".into())
-    } else {
-        Ok(())
-    }
+    debug!("start chain {}", proxy);
+    let target = SockAddr::new_inet(InetAddr::new(IpAddr::from_std(&proxy.ip), proxy.port));
+    core::timed_connect(sock, &target, config.tcp_connect_timeout)?;
+    Ok(())
 }
 
 fn read_response(sock: RawFd) -> Result<(), Box<dyn std::error::Error>> {
     let mut buf = [0; 4];
-    recv_exact(sock, &mut buf)?;
+    let config = &*CONFIG;
+    core::read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
 
     if buf[0] != 5 {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid response version").into());
@@ -104,7 +90,7 @@ fn read_response(sock: RawFd) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut buf = vec![0; len + 2];
-    recv_exact(sock, &mut buf)?;
+    core::read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
 
     Ok(())
 }
@@ -134,7 +120,8 @@ fn chain_step(
     from: &ProxyConf,
     to: &ProxyConf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let flags = MsgFlags::empty();
+    debug!("chain {} <> {}", from, to);
+    let config = &*CONFIG;
 
     match from.proto {
         ProxyType::Raw => Ok(()),
@@ -146,12 +133,12 @@ fn chain_step(
 
             let packet = format!("CONNECT {}:{} HTTP/1.0\r\n\r\n", ip, to.port);
             let packet = packet.as_bytes();
-            send(sock, &packet, flags)?;
+            write(sock, &packet)?;
 
             let mut len = 0;
             let mut buf = [0; 1024];
             while len < 1024 {
-                recv_exact(sock, &mut buf[len..len + 1])?;
+                core::read_timeout(sock, &mut buf[len..len + 1], config.tcp_read_timeout)?;
                 len += 1;
                 if len > 4
                     && (buf[len - 1] == b'\n'
@@ -187,10 +174,10 @@ fn chain_step(
                 _ => return Err("address family not supported by socks4".into()),
             }
 
-            send(sock, &packet, flags)?;
+            write(sock, &packet)?;
 
             let mut buf = [0; 8];
-            recv_exact(sock, &mut buf)?;
+            core::read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
 
             if buf[0] != 0 {
                 return Err(
@@ -236,10 +223,10 @@ fn chain_step(
                 1, // methods
                 0, // no auth
             ];
-            send(sock, &packet, flags)?;
+            write(sock, &packet)?;
 
             let mut buf = [0; 2];
-            recv_exact(sock, &mut buf)?;
+            core::read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
 
             let response_version = buf[0];
             let selected_method = buf[1];
@@ -263,7 +250,7 @@ fn chain_step(
 
             // write address
             let len = write_addr(&mut packet[3..], &to)?;
-            send(sock, &packet[..len + 3], flags)?;
+            write(sock, &packet[..len + 3])?;
 
             // read response + address on success
             read_response(sock)?;
@@ -316,29 +303,46 @@ fn connect_proxyc(sock: RawFd, target: &SockAddr) -> Result<(), Box<dyn std::err
             let ns = socket(target.family(), SockType::Stream, SockFlag::empty(), None)?;
 
             // build a list of tuple of proxies to connect to.
-            // first is None to to start the chain.
+            // first is None to start the chain.
             // last is the target.
-            let proxies: Vec<(Option<&ProxyConf>, Option<&ProxyConf>)> = {
-                let mut prx = vec![];
 
-                prx.push((None, config.proxies.get(0)));
+            // old code which allocated at each connect :/
+            // let proxies: Vec<(Option<&ProxyConf>, Option<&ProxyConf>)> = {
+            //     let mut prx = vec![];
 
-                if config.proxies.len() > 1 {
-                    let iter = config.proxies.windows(2).map(|w| (w.get(0), w.get(1)));
-                    prx.extend(iter);
-                }
+            //     prx.push((None, config.proxies.get(0)));
 
-                prx.push((config.proxies.last(), Some(&target_conf)));
-                prx
-            };
+            //     if config.proxies.len() > 1 {
+            //         let iter = config.proxies.windows(2).map(|w| (w.get(0), w.get(1)));
+            //         prx.extend(iter);
+            //     }
 
-            for (p1, p2) in proxies {
-                let to = p2.unwrap();
-                match p1 {
-                    None => chain_start(ns, to)?,
-                    Some(p) => chain_step(ns, p, to)?,
-                }
+            //     prx.push((config.proxies.last(), Some(&target_conf)));
+            //     prx
+            // };
+
+            // for w in config.proxies.windows(2) {
+            //     debug!("window {:?}", w);
+            // }
+
+            // for (p1, p2) in proxies {
+            //     let to = p2.unwrap();
+            //     match p1 {
+            //         None => chain_start(ns, to)?,
+            //         Some(p) => chain_step(ns, p, to)?,
+            //     }
+            // }
+
+            // new
+            // start the chain by connecting to the first proxy
+            chain_start(ns, config.proxies.first().unwrap())?;
+
+            // chain each proxy ends
+            for w in config.proxies.windows(2) {
+                chain_step(ns, &w[0], &w[1])?;
             }
+            // chain the target
+            chain_step(ns, config.proxies.last().unwrap(), &target_conf)?;
 
             Ok(ns)
         }
@@ -377,6 +381,7 @@ fn connect(sock: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
                 Ok(_) => return 0,
                 Err(e) => {
                     error!("{}", e);
+                    core::set_errno(Errno::ECONNREFUSED); // for nmap
                     return -1;
                 }
             }

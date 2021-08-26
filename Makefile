@@ -7,6 +7,10 @@ all:
 	cargo build -p libproxyc
 	cargo build
 
+release:
+	cargo build -p libproxyc --release
+	cargo build --release
+
 clean:
 	cargo clean -p libproxyc
 	cargo clean

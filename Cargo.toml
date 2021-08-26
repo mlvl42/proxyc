@@ -17,3 +17,6 @@ log = "0.4"
 
 [build-dependencies]
 libproxyc = { path = "./libproxyc" }
+
+[profile.release]
+debug = 1

@@ -1,12 +1,14 @@
-log_level = "info"
+log_level = "debug"
 chain_type = "strict"
+tcp_read_time_out = 15000
+tcp_connect_time_out = 8000
 
 [[proxy]]
-type = "http"
-ip = "127.0.0.1"
-port = 8888
-
-[[proxy]]
-type = "socks4"
+type = "socks5"
 ip = "127.0.0.1"
 port = 1080
+
+# [[proxy]]
+# type = "http"
+# ip = "127.0.0.1"
+# port = 8888

@@ -123,6 +123,14 @@ pub enum ConfigError {
     MissingEnv(String),
 }
 
+fn default_tcp_read() -> usize {
+    15000
+}
+
+fn default_tcp_connect() -> usize {
+    8000
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProxycConfig {
     #[serde(rename = "proxy")]
@@ -130,8 +138,10 @@ pub struct ProxycConfig {
     pub chain_type: ChainType,
     #[serde(with = "LevelFilterRef")]
     pub log_level: LevelFilter,
-    pub tcp_read_timeout: Option<usize>,
-    pub tcp_connect_timeout: Option<usize>,
+    #[serde(default = "default_tcp_read")]
+    pub tcp_read_timeout: usize,
+    #[serde(default = "default_tcp_connect")]
+    pub tcp_connect_timeout: usize,
 }
 
 impl ProxycConfig {
