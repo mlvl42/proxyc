@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use log::LevelFilter;
 use proxyc_common::{ChainType, ProxyConf, ProxycConfig};
+use std::env;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use structopt::clap::AppSettings;
@@ -53,7 +54,9 @@ fn main() -> Result<()> {
         .find(|x| std::fs::metadata(x).is_ok())
         .map(|x| std::fs::canonicalize(x).ok())
         .and_then(|x| x)
-        .ok_or(anyhow!("libproxyc.so not found"))?;
+        .ok_or(anyhow!("libproxyc.so not found"))?
+        .display()
+        .to_string();
 
     // no files provided, try to find one
     let config_path = CONFIG_FILE_PATHS
@@ -87,13 +90,19 @@ fn main() -> Result<()> {
     // pass config in env variable
     let config_env = config.to_json()?;
 
+    // do not overwrite LD_PRELOAD variable if it is already set
+    let ld_preload = match env::var("LD_PRELOAD") {
+        Ok(val) => format!("{}:{}", val, lib_path),
+        Err(_e) => lib_path,
+    };
+
     // TODO
     // - get .so dynamically ?
     Ok(match program {
         Some(x) => {
             Command::new(&x)
                 .args(args)
-                .env("LD_PRELOAD", lib_path)
+                .env("LD_PRELOAD", ld_preload)
                 .env("PROXYC_CONFIG", config_env)
                 .exec();
         }

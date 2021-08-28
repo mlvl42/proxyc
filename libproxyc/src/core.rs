@@ -23,22 +23,24 @@ pub static CONNECT: Lazy<Option<ConnectFn>> = Lazy::new(|| unsafe {
 ///
 /// We can't use nix::sys::socket::connect since it would call our hooked
 /// connect function and recurse infinitely.
-pub fn connect(fd: RawFd, addr: &SockAddr) -> Result<(), Box<dyn std::error::Error>> {
-    let c_connect = CONNECT.expect("Cannot load symbol 'connect'");
+// pub fn connect(fd: RawFd, addr: &SockAddr) -> Result<(), Box<dyn std::error::Error>> {
+//     let c_connect = CONNECT.expect("Cannot load symbol 'connect'");
 
-    let res = unsafe {
-        let (ptr, len) = addr.as_ffi_pair();
-        c_connect(fd, ptr, len)
-    };
+//     let res = unsafe {
+//         let (ptr, len) = addr.as_ffi_pair();
+//         c_connect(fd, ptr, len)
+//     };
 
-    if let Err(x) = Errno::result(res).map(drop).map_err(|x| x.into()) {
-        Err(x)
-    } else {
-        // Ok(unsafe { TcpStream::from_raw_fd(fd) })
-        Ok(())
-    }
-}
+//     if let Err(x) = Errno::result(res).map(drop).map_err(|x| x.into()) {
+//         Err(x)
+//     } else {
+//         // Ok(unsafe { TcpStream::from_raw_fd(fd) })
+//         Ok(())
+//     }
+// }
 
+/// Initiate a connection on a socket, timeout after specified time in
+/// milliseconds.
 pub fn timed_connect(
     fd: RawFd,
     addr: &SockAddr,
@@ -51,7 +53,7 @@ pub fn timed_connect(
 
     oflag.toggle(OFlag::O_NONBLOCK);
     match fcntl(fd, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)) {
-        Ok(n) => (),
+        Ok(_) => (),
         Err(e) => error!("fcntl NONBLOCK error: {}", e),
     };
 
@@ -76,7 +78,7 @@ pub fn timed_connect(
 
     oflag.toggle(OFlag::O_NONBLOCK);
     match fcntl(fd, FcntlArg::F_SETFL(oflag)) {
-        Ok(n) => (),
+        Ok(_) => (),
         Err(e) => error!("fcntl BLOCK error: {}", e),
     };
 
@@ -144,11 +146,6 @@ pub fn poll_retry(
         }
     }
 }
-
-// TODO: connect timeout, adapt from rust std
-// https://github.com/rust-lang/rust/blob/db492ecd5ba6bd82205612cebb9034710653f0c2/library/std/src/sys/unix/net.rs#L124
-// pub fn connect_timeout(fd: RawFd, addr: &SockAddr, timeout: Duration) -> Result<TcpStream, Box<dyn std::error::Error>> {
-// }
 
 /// Creates a `SockAddr` struct from libc's sockaddr.
 ///
