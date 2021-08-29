@@ -26,6 +26,14 @@ struct ProxycOpt {
     #[structopt(short, long)]
     chain: Option<ChainType>,
 
+    /// read timeout
+    #[structopt(long)]
+    tcp_read_timeout: Option<usize>,
+
+    /// connect timeout
+    #[structopt(long)]
+    tcp_connect_timeout: Option<usize>,
+
     /// the command line to hook
     args: Vec<String>,
 }
@@ -84,6 +92,14 @@ fn main() -> Result<()> {
             config.chain_type = chain;
         }
 
+        if let Some(tcp_connect_timeout) = opts.tcp_connect_timeout {
+            config.tcp_connect_timeout = tcp_connect_timeout;
+        }
+
+        if let Some(tcp_read_timeout) = opts.tcp_read_timeout {
+            config.tcp_read_timeout = tcp_read_timeout;
+        }
+
         config
     };
 
@@ -96,8 +112,6 @@ fn main() -> Result<()> {
         Err(_e) => lib_path,
     };
 
-    // TODO
-    // - get .so dynamically ?
     Ok(match program {
         Some(x) => {
             Command::new(&x)
