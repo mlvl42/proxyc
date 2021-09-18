@@ -1,22 +1,7 @@
-[package]
-name = "proxyc"
-version = "0.1.0"
-authors = ["j3d42 <melvil.guillaume@gmail.com>"]
-edition = "2018"
+[workspace]
 
-[dependencies.proxyc_common]
-path = "./common"
-
-[dependencies]
-serde = { version = "1.0", features = ["derive"] }
-structopt = "0.3"
-toml = "0.5"
-thiserror = "1.0"
-anyhow = "1.0"
-log = "0.4"
-
-[build-dependencies]
-libproxyc = { path = "./libproxyc" }
-
-[profile.release]
-debug = 1
+members = [
+	"common",
+	"libproxyc",
+	"bin",
+]
