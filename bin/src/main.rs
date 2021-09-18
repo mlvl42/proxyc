@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use log::LevelFilter;
 use proxyc_common::{ChainType, ProxyConf, ProxycConfig};
 use std::env;
@@ -79,16 +79,21 @@ fn main() -> Result<()> {
             .find(|x| std::fs::metadata(x).is_ok())
             .map(|x| std::fs::canonicalize(x).ok())
             .and_then(|x| x),
-    }
-    .ok_or_else(|| anyhow!("invalid path to config file"))?;
+    };
 
     // parse the config before passing it down the shared library through the
     // environment
     let config = {
-        let mut config = ProxycConfig::new(&config_path)
-            .with_context(|| format!("Invalid configuration file: {:?}", config_path))?;
-
-        // enrich config with values provided in command line
+        let mut config = {
+            if let Some(p) = &config_path {
+                ProxycConfig::new(&p)
+                    .with_context(|| format!("Invalid configuration file: {:?}", config_path))?
+            } else {
+                ProxycConfig::default()
+            }
+        };
+        // providing proxies in CLI parameters overwrites the proxies defined
+        // in the configuration file, if any.
         if !opts.proxy.is_empty() {
             config.proxies = opts.proxy;
         }
@@ -111,6 +116,11 @@ fn main() -> Result<()> {
 
         config
     };
+
+    // check if there are any proxies defined
+    if config.proxies.is_empty() {
+        bail!("at least one proxy is required, use --proxy or define the list of proxies in the configuration file.");
+    }
 
     // pass config in env variable
     let config_env = config.to_json()?;

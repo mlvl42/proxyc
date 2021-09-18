@@ -1,5 +1,6 @@
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
+use std::default::Default;
 use std::fmt;
 use std::io;
 use std::io::Read;
@@ -132,6 +133,7 @@ fn default_tcp_connect() -> usize {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ProxycConfig {
     #[serde(rename = "proxy")]
     pub proxies: Vec<ProxyConf>,
@@ -162,5 +164,17 @@ impl ProxycConfig {
 
     pub fn to_json(&self) -> Result<String, ConfigError> {
         Ok(serde_json::to_string(self)?)
+    }
+}
+
+impl Default for ProxycConfig {
+    fn default() -> Self {
+        Self {
+            proxies: vec![],
+            chain_type: ChainType::Strict,
+            log_level: LevelFilter::Info,
+            tcp_read_timeout: 15000,
+            tcp_connect_timeout: 8000,
+        }
     }
 }
