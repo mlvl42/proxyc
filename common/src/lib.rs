@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 use url::Url;
@@ -79,13 +79,13 @@ impl FromStr for ProxyConf {
 
         let ip = url
             .host()
-            .ok_or(ConfigError::ParseError("missing host".into()))?;
+            .ok_or_else(|| ConfigError::ParseError("missing host".into()))?;
         let ip = std::net::IpAddr::from_str(&ip.to_string()).map_err(|_| {
             ConfigError::ParseError(format!("invalid ip address {:?}", &ip.to_string()))
         })?;
         let port = url
             .port()
-            .ok_or(ConfigError::ParseError("missing port".into()))?;
+            .ok_or_else(|| ConfigError::ParseError("missing port".into()))?;
 
         Ok(ProxyConf { proto, ip, port })
     }
@@ -145,7 +145,7 @@ pub struct ProxycConfig {
 }
 
 impl ProxycConfig {
-    pub fn new(path: &PathBuf) -> Result<Self, ConfigError> {
+    pub fn new(path: &Path) -> Result<Self, ConfigError> {
         let mut file = std::fs::File::open(path)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;

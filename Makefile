@@ -11,6 +11,10 @@ release:
 	cargo build -p libproxyc --release
 	cargo build --release
 
+clippy:
+	cargo clippy
+	cargo clippy -p libproxyc
+
 clean:
 	cargo clean -p libproxyc
 	cargo clean

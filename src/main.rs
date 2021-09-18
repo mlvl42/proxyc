@@ -1,8 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use log::LevelFilter;
 use proxyc_common::{ChainType, ProxyConf, ProxycConfig};
 use std::env;
 use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::Command;
 use structopt::clap::AppSettings;
 use structopt::StructOpt;
@@ -15,7 +16,7 @@ use structopt::StructOpt;
 )]
 struct ProxycOpt {
     /// proxy definition
-    #[structopt(short, long)]
+    #[structopt(short, long, use_delimiter = true)]
     proxy: Vec<ProxyConf>,
 
     /// log level
@@ -25,6 +26,10 @@ struct ProxycOpt {
     /// chain type
     #[structopt(short, long)]
     chain: Option<ChainType>,
+
+    /// custom path to config file
+    #[structopt(short, long, parse(from_os_str))]
+    file_config: Option<PathBuf>,
 
     /// read timeout
     #[structopt(long)]
@@ -51,10 +56,8 @@ const SHARED_LIB_PATHS: [&str; 1] = ["/usr/lib/libproxyc.so"];
 fn main() -> Result<()> {
     let opts = ProxycOpt::from_args();
 
-    let program = opts.args.iter().next();
+    let program = opts.args.get(0);
     let args = opts.args.iter().skip(1);
-
-    // TODO check provided conf file via argument
 
     // find libproxyc.so
     let lib_path = SHARED_LIB_PATHS
@@ -62,25 +65,31 @@ fn main() -> Result<()> {
         .find(|x| std::fs::metadata(x).is_ok())
         .map(|x| std::fs::canonicalize(x).ok())
         .and_then(|x| x)
-        .ok_or(anyhow!("libproxyc.so not found"))?
+        .ok_or_else(|| anyhow!("libproxyc.so not found"))?
         .display()
         .to_string();
 
+    // TODO add arg config file
+
     // no files provided, try to find one
-    let config_path = CONFIG_FILE_PATHS
-        .iter()
-        .find(|x| std::fs::metadata(x).is_ok())
-        .map(|x| std::fs::canonicalize(x).ok())
-        .and_then(|x| x)
-        .ok_or(anyhow!("proxyc.toml file not found"))?;
+    let config_path = match opts.file_config {
+        Some(p) => Some(p),
+        None => CONFIG_FILE_PATHS
+            .iter()
+            .find(|x| std::fs::metadata(x).is_ok())
+            .map(|x| std::fs::canonicalize(x).ok())
+            .and_then(|x| x),
+    }
+    .ok_or_else(|| anyhow!("invalid path to config file"))?;
 
     // parse the config before passing it down the shared library through the
     // environment
     let config = {
-        let mut config = ProxycConfig::new(&config_path)?;
+        let mut config = ProxycConfig::new(&config_path)
+            .with_context(|| format!("Invalid configuration file: {:?}", config_path))?;
 
         // enrich config with values provided in command line
-        if opts.proxy.len() > 0 {
+        if !opts.proxy.is_empty() {
             config.proxies = opts.proxy;
         }
 
@@ -112,7 +121,7 @@ fn main() -> Result<()> {
         Err(_e) => lib_path,
     };
 
-    Ok(match program {
+    match program {
         Some(x) => {
             Command::new(&x)
                 .args(args)
@@ -125,5 +134,6 @@ fn main() -> Result<()> {
             println!();
             std::process::exit(1);
         }
-    })
+    };
+    Ok(())
 }

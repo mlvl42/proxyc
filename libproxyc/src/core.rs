@@ -1,3 +1,4 @@
+use crate::error::Error;
 use cstr::cstr;
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
@@ -23,7 +24,7 @@ pub static CONNECT: Lazy<Option<ConnectFn>> = Lazy::new(|| unsafe {
 ///
 /// We can't use nix::sys::socket::connect since it would call our hooked
 /// connect function and recurse infinitely.
-// pub fn connect(fd: RawFd, addr: &SockAddr) -> Result<(), Box<dyn std::error::Error>> {
+// pub fn connect(fd: RawFd, addr: &SockAddr) -> Result<(), Error> {
 //     let c_connect = CONNECT.expect("Cannot load symbol 'connect'");
 
 //     let res = unsafe {
@@ -41,11 +42,7 @@ pub static CONNECT: Lazy<Option<ConnectFn>> = Lazy::new(|| unsafe {
 
 /// Initiate a connection on a socket, timeout after specified time in
 /// milliseconds.
-pub fn timed_connect(
-    fd: RawFd,
-    addr: &SockAddr,
-    timeout: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn timed_connect(fd: RawFd, addr: &SockAddr, timeout: usize) -> Result<(), Error> {
     let c_connect = CONNECT.expect("Cannot load symbol 'connect'");
 
     let mut fds = [PollFd::new(fd, PollFlags::POLLOUT)];
@@ -69,10 +66,10 @@ pub fn timed_connect(
             1 => {
                 match getsockopt(fd, SocketError)? {
                     0 => (),
-                    _ => return Err("SO_ERROR".into()),
+                    _ => return Err(Error::SocketError),
                 };
             }
-            _ => return Err("connect error after poll_retry".into()),
+            _ => return Err(Error::ConnectError("poll_retry".into())),
         };
     }
 
@@ -89,11 +86,7 @@ pub fn timed_connect(
     }
 }
 
-pub fn read_timeout(
-    fd: RawFd,
-    mut buf: &mut [u8],
-    timeout: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn read_timeout(fd: RawFd, mut buf: &mut [u8], timeout: usize) -> Result<(), Error> {
     let mut fds = [PollFd::new(fd, PollFlags::POLLIN)];
 
     while !buf.is_empty() {
@@ -103,7 +96,7 @@ pub fn read_timeout(
             .revents()
             .map_or(true, |e| !e.contains(PollFlags::POLLIN))
         {
-            return Err("POLLING poll flag missing".into());
+            return Err(Error::Generic("POLLING poll flag missing".into()));
         }
 
         match read(fd, buf) {
@@ -116,16 +109,13 @@ pub fn read_timeout(
         }
     }
     if !buf.is_empty() {
-        Err("failed to fill whole buffer".into())
+        Err(Error::MissingData)
     } else {
         Ok(())
     }
 }
 
-pub fn poll_retry(
-    mut fds: &mut [PollFd],
-    timeout: usize,
-) -> Result<i32, Box<dyn std::error::Error>> {
+pub fn poll_retry(mut fds: &mut [PollFd], timeout: usize) -> Result<i32, Error> {
     let now = Instant::now();
     let mut remaining: i32 = timeout.try_into().unwrap();
     loop {
@@ -136,13 +126,13 @@ pub fn poll_retry(
             .unwrap_or(0);
 
         if remaining == 0 {
-            return Err("poll timeout".into());
+            return Err(Error::Timeout);
         }
 
         match ret {
             Ok(nfds) => return Ok(nfds),
             Err(Errno::EINTR) => (),
-            Err(e) => return Err(format!("poll error, errno: {}", e).into()),
+            Err(e) => return Err(e.into()),
         }
     }
 }

@@ -3,7 +3,9 @@ extern crate log;
 extern crate pretty_env_logger;
 
 mod core;
+mod error;
 
+use crate::error::Error;
 use byteorder::{BigEndian, WriteBytesExt};
 use nix::errno::Errno;
 use nix::libc::{c_int, sockaddr, socklen_t};
@@ -20,28 +22,7 @@ use std::os::unix::io::RawFd;
 static CONFIG: Lazy<ProxycConfig> =
     Lazy::new(|| ProxycConfig::from_env().expect("failed to parse config"));
 
-/// Converts a value from host byte order to network byte order.
-pub fn htons(u: u16) -> u16 {
-    u.to_be()
-}
-/// Converts a value from network byte order to host byte order.
-pub fn ntohs(u: u16) -> u16 {
-    u16::from_be(u)
-}
-
-/// Converts a value from host byte order to network byte order.
-#[inline]
-pub fn htonl(u: u32) -> u32 {
-    u.to_be()
-}
-
-/// Converts a value from network byte order to host byte order.
-#[inline]
-pub fn ntohl(u: u32) -> u32 {
-    u32::from_be(u)
-}
-
-fn chain_start(sock: RawFd, proxy: &ProxyConf) -> Result<(), Box<dyn std::error::Error>> {
+fn chain_start(sock: RawFd, proxy: &ProxyConf) -> Result<(), Error> {
     let config = &*CONFIG;
 
     debug!("start chain {}", proxy);
@@ -50,7 +31,7 @@ fn chain_start(sock: RawFd, proxy: &ProxyConf) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-fn read_response(sock: RawFd) -> Result<(), Box<dyn std::error::Error>> {
+fn read_response(sock: RawFd) -> Result<(), Error> {
     let mut buf = [0; 4];
     let config = &*CONFIG;
     core::read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
@@ -95,10 +76,7 @@ fn read_response(sock: RawFd) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn write_addr(
-    mut packet: &mut [u8],
-    target: &ProxyConf,
-) -> Result<usize, Box<dyn std::error::Error>> {
+fn write_addr(mut packet: &mut [u8], target: &ProxyConf) -> Result<usize, Error> {
     let start_len = packet.len();
     match target.ip {
         std::net::IpAddr::V4(addr) => {
@@ -115,11 +93,7 @@ fn write_addr(
     Ok(start_len - packet.len())
 }
 
-fn chain_step(
-    sock: RawFd,
-    from: &ProxyConf,
-    to: &ProxyConf,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn chain_step(sock: RawFd, from: &ProxyConf, to: &ProxyConf) -> Result<(), Error> {
     debug!("chain {} <> {}", from, to);
     let config = &*CONFIG;
 
@@ -133,7 +107,7 @@ fn chain_step(
 
             let packet = format!("CONNECT {}:{} HTTP/1.0\r\n\r\n", ip, to.port);
             let packet = packet.as_bytes();
-            write(sock, &packet)?;
+            write(sock, packet)?;
 
             let mut len = 0;
             let mut buf = [0; 1024];
@@ -171,7 +145,11 @@ fn chain_step(
                     // write user here
                     packet.write_u8(0)?;
                 }
-                _ => return Err("address family not supported by socks4".into()),
+                _ => {
+                    return Err(Error::Generic(
+                        "address family not supported by socks4".into(),
+                    ))
+                }
             }
 
             write(sock, &packet)?;
@@ -196,7 +174,7 @@ fn chain_step(
                     return Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
                         "request rejected because SOCKS server cannot connect to \
-                                       idnetd on the client",
+                                       identd on the client",
                     )
                     .into())
                 }
@@ -249,7 +227,7 @@ fn chain_step(
             packet[2] = 0; // reserved
 
             // write address
-            let len = write_addr(&mut packet[3..], &to)?;
+            let len = write_addr(&mut packet[3..], to)?;
             write(sock, &packet[..len + 3])?;
 
             // read response + address on success
@@ -261,11 +239,7 @@ fn chain_step(
 }
 
 // TODO handle ipv6
-fn connect_proxyc(
-    sock: RawFd,
-    ns: RawFd,
-    target: &SockAddr,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn connect_proxyc(sock: RawFd, ns: RawFd, target: &SockAddr) -> Result<(), Error> {
     let config = &*CONFIG;
 
     // Build a proxyconf from the target sockaddr
@@ -274,7 +248,7 @@ fn connect_proxyc(
             let tmp = x.to_std();
             Ok((tmp.ip(), tmp.port()))
         }
-        _ => Err("not an inet sockaddr"),
+        _ => Err(Error::Generic("not an inet sockaddr".into())),
     }?;
 
     let target_conf = ProxyConf {
@@ -306,7 +280,7 @@ fn connect_proxyc(
 
             Ok(ns)
         }
-        _ => Err("chain type not handled"),
+        _ => Err(Error::Generic("chain type not handled".into())),
     }?;
 
     dup2(new_sock, sock)?;
@@ -316,14 +290,14 @@ fn connect_proxyc(
     Ok(())
 }
 
-fn check_socket(sock: RawFd, addr: &SockAddr) -> Result<(), Box<dyn std::error::Error>> {
+fn check_socket(sock: RawFd, addr: &SockAddr) -> Result<(), Error> {
     let socktype = getsockopt(sock, sockopt::SockType).unwrap();
     let fam = addr.family();
 
     if !((fam == (AddressFamily::Inet) || fam == AddressFamily::Inet6)
         && socktype == SockType::Stream)
     {
-        return Err("bad socket, very bad".into());
+        return Err(Error::Generic("bad socket, very bad".into()));
     }
 
     Ok(())
@@ -331,7 +305,6 @@ fn check_socket(sock: RawFd, addr: &SockAddr) -> Result<(), Box<dyn std::error::
 
 #[no_mangle]
 fn connect(sock: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
-    // let addr_opt = unsafe { address.as_ref() };
     let c_connect = core::CONNECT.expect("Cannot load symbol 'connect'");
     let addr_opt = unsafe { core::from_libc_sockaddr(address) };
 
@@ -368,9 +341,9 @@ extern "C" fn init() {
 
     pretty_env_logger::init();
 
-    debug!("chain_type: {:?}", config.chain_type);
-    debug!("proxies:");
+    info!("chain_type: {:?}", config.chain_type);
+    info!("proxies:");
     for p in &config.proxies {
-        debug!("\t{}", p);
+        info!("\t{}", p);
     }
 }
