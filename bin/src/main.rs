@@ -16,7 +16,7 @@ use structopt::StructOpt;
 )]
 struct ProxycOpt {
     /// proxy definition
-    #[structopt(short, long, use_delimiter = true)]
+    #[structopt(short, long, require_delimiter = true)]
     proxy: Vec<ProxyConf>,
 
     /// log level
@@ -68,8 +68,6 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("libproxyc.so not found"))?
         .display()
         .to_string();
-
-    // TODO add arg config file
 
     // no files provided, try to find one
     let config_path = match opts.file_config {
