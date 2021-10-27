@@ -84,7 +84,7 @@ fn main() -> Result<()> {
     let config = {
         let mut config = {
             if let Some(p) = &config_path {
-                ProxycConfig::new(&p)
+                ProxycConfig::new(p)
                     .with_context(|| format!("Invalid configuration file: {:?}", config_path))?
             } else {
                 ProxycConfig::default()

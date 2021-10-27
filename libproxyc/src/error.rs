@@ -5,15 +5,15 @@ pub enum Error {
     #[error("poll timeout")]
     Timeout,
     #[error("socket error")]
-    SocketError,
+    Socket,
     #[error("connect error: {0}")]
-    ConnectError(String),
+    Connect(String),
     #[error("missing data")]
     MissingData,
     #[error("{0}")]
     Generic(String),
     #[error(transparent)]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[error(transparent)]
     Errno(#[from] nix::errno::Errno),
 }
