@@ -2,7 +2,7 @@
 name = "proxyc_common"
 version = "0.1.0"
 authors = ["j3d42 <melvil.guillaume@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
