@@ -1,6 +1,7 @@
 use crate::core;
 use crate::error::Error;
 use nix::errno::Errno;
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::libc::{c_int, sockaddr, socklen_t};
 use nix::sys::socket::{getsockopt, socket, sockopt, AddressFamily, SockAddr, SockFlag, SockType};
 use nix::unistd::close;
@@ -31,8 +32,32 @@ pub fn connect(sock: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
                 Err(_e) => return -1,
             };
 
+            // store original flags set by caller.
+            // we will mess with it later and thus need to reset it before
+            // returning.
+            let flags = match fcntl(sock, FcntlArg::F_GETFL) {
+                Ok(f) => OFlag::from_bits_truncate(f),
+                Err(_) => return -1,
+            };
+            let flags_orig = flags;
+
+            //if flags.contains(OFlag::O_NONBLOCK) {
+            //    flags.toggle(OFlag::O_NONBLOCK);
+            //    fcntl(sock, FcntlArg::F_SETFL(flags)).expect("fcntl force blocking failed");
+            //}
+
             match core::connect_proxyc(sock, ns, &addr) {
-                Ok(_) => return 0,
+                Ok(_) => {
+                    info!("connect success");
+                    match fcntl(sock, FcntlArg::F_SETFL(flags_orig)) {
+                        Ok(_) => {
+                            return 0;
+                        }
+                        Err(e) => {
+                            error!("fcntl apply original flags error: {}", e)
+                        }
+                    }
+                }
                 Err(e) => {
                     close(ns).ok();
                     error!("{}", e);

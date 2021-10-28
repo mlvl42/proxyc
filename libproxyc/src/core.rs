@@ -3,8 +3,7 @@ use byteorder::{BigEndian, WriteBytesExt};
 use cstr::cstr;
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
-use nix::libc;
-use nix::libc::{c_int, sockaddr, socklen_t};
+use nix::libc::{self, addrinfo, c_char, c_int, sockaddr, socklen_t};
 use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::socket::sockopt::SocketError;
 use nix::sys::socket::{getsockopt, AddressFamily, InetAddr, IpAddr, SockAddr};
@@ -21,8 +20,19 @@ use std::time::Instant;
 type ConnectFn =
     unsafe extern "C" fn(socket: RawFd, address: *const sockaddr, len: socklen_t) -> c_int;
 
+type GetAddrInfoFn = unsafe extern "C" fn(
+    node: *const c_char,
+    service: *const c_char,
+    hints: *const addrinfo,
+    res: *mut *mut addrinfo,
+) -> c_int;
+
 pub static CONNECT: Lazy<Option<ConnectFn>> = Lazy::new(|| unsafe {
     std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, cstr!("connect").as_ptr()))
+});
+
+pub static GETADDRINFO: Lazy<Option<GetAddrInfoFn>> = Lazy::new(|| unsafe {
+    std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, cstr!("getaddrinfo").as_ptr()))
 });
 
 pub static CONFIG: Lazy<ProxycConfig> =
