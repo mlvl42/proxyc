@@ -4,7 +4,9 @@ extern crate pretty_env_logger;
 
 mod core;
 mod error;
-mod hooks;
+mod hook;
+mod proxy;
+mod util;
 
 /// This is called when our dynamic library is loaded, so we setup our internals
 /// here.
