@@ -1,3 +1,4 @@
+use cidr::Ipv4Cidr;
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use std::default::Default;
@@ -174,6 +175,12 @@ fn default_tcp_connect() -> usize {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct IgnoreSubnet {
+    pub cidr: Ipv4Cidr,
+    pub port: Option<u16>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProxycConfig {
     #[serde(rename = "proxy")]
@@ -185,6 +192,9 @@ pub struct ProxycConfig {
     pub tcp_read_timeout: usize,
     #[serde(default = "default_tcp_connect")]
     pub tcp_connect_timeout: usize,
+    pub proxy_dns: bool,
+    pub dns_subnet: u8,
+    pub ignore_subnets: Vec<IgnoreSubnet>,
 }
 
 impl ProxycConfig {
@@ -216,6 +226,9 @@ impl Default for ProxycConfig {
             log_level: LevelFilter::Info,
             tcp_read_timeout: 15000,
             tcp_connect_timeout: 8000,
+            proxy_dns: true,
+            dns_subnet: 224,
+            ignore_subnets: vec![],
         }
     }
 }

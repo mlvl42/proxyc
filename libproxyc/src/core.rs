@@ -4,13 +4,18 @@ use crate::util::poll_retry;
 use cstr::cstr;
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
-use nix::libc::{self, addrinfo, c_char, c_int, sockaddr, socklen_t};
+use nix::libc::{
+    self, addrinfo, c_char, c_int, c_void, hostent, servent, size_t, sockaddr, sockaddr_in,
+    sockaddr_in6, sockaddr_storage, socklen_t,
+};
 use nix::poll::{PollFd, PollFlags};
 use nix::sys::socket::sockopt::SocketError;
 use nix::sys::socket::{getsockopt, AddressFamily, InetAddr, IpAddr, SockAddr};
 use nix::unistd::{close, dup2};
 use once_cell::sync::Lazy;
 use proxyc_common::{ChainType, ProxyConf, ProxyType, ProxycConfig};
+use std::mem;
+use std::mem::MaybeUninit;
 use std::os::unix::io::RawFd;
 
 type ConnectFn =
@@ -136,6 +141,16 @@ pub fn set_errno(errno: Errno) {
 
 extern "C" {
     pub fn __errno_location() -> *mut i32;
+    fn inet_aton(cp: *const c_char, inp: *const libc::in_addr) -> c_int;
+    fn inet_pton(af: c_int, src: *const c_char, dst: *const c_void) -> c_int;
+    fn getservbyname_r(
+        name: *const c_char,
+        proto: *const c_char,
+        result_buf: *mut servent,
+        buf: *mut c_char,
+        buflen: size_t,
+        result: *mut *mut servent,
+    ) -> c_int;
 }
 
 /// main logic
@@ -152,7 +167,6 @@ fn chain_start(sock: RawFd, proxy: &ProxyConf) -> Result<(), Error> {
 fn chain_step(sock: RawFd, from: &ProxyConf, to: &ProxyConf) -> Result<(), Error> {
     debug!("chain {} <=> {}", from, to);
 
-    println!("{:?}", to);
     match from.proto {
         ProxyType::Raw => Ok(()),
         ProxyType::Http => Ok(proxy::Http::connect(sock, to, from.auth.as_ref())?),
@@ -212,4 +226,183 @@ pub fn connect_proxyc(sock: RawFd, ns: RawFd, target: &SockAddr) -> Result<(), E
 
     debug!("connected to {}", target.to_str());
     Ok(())
+}
+
+#[repr(C)]
+struct AddrinfoData {
+    ai_buf: addrinfo,
+    sa_buf: sockaddr_storage,
+    addr_name: [c_char; 256],
+}
+
+fn contains_numeric_ip(node: *const c_char, sa_buf: *mut sockaddr_storage) -> bool {
+    unsafe {
+        (*(sa_buf as *mut _ as *mut sockaddr_in)).sin_family = libc::AF_INET as u16;
+        let ret = inet_aton(node, &(*(sa_buf as *mut _ as *mut sockaddr_in)).sin_addr);
+        if ret != 0 {
+            return true;
+        }
+
+        (*(sa_buf as *mut _ as *mut sockaddr_in6)).sin6_family = libc::AF_INET6 as u16;
+        let ret = inet_pton(
+            libc::AF_INET6,
+            node,
+            &(*(sa_buf as *mut _ as *mut sockaddr_in6)).sin6_addr as *const _ as *const c_void,
+        );
+        if ret != 0 {
+            return true;
+        }
+
+        false
+    }
+}
+
+#[repr(C)]
+struct GetHostByNameData {
+    hs: hostent,
+    raddr: libc::in_addr_t,
+    raddr_p: [*const c_char; 2],
+    addr_name: [c_char; 256],
+}
+
+fn proxyc_gethostbyname(
+    name: *const c_char,
+    gh: *mut GetHostByNameData,
+) -> Result<*mut hostent, std::io::Error> {
+    let mut ptr = unsafe { &mut *gh };
+    ptr.raddr_p[0] = &ptr.raddr as *const _ as *const c_char;
+    ptr.raddr_p[1] = std::ptr::null();
+
+    ptr.hs.h_addr_list = ptr.raddr_p.as_mut_ptr() as *mut *mut i8;
+    ptr.hs.h_aliases = ptr.raddr_p[1] as *mut *mut i8;
+
+    // example: assign localhost
+    // ptr.raddr = (0x7f000001 as u32).to_be();
+    ptr.raddr = 0;
+    ptr.hs.h_addrtype = libc::AF_INET;
+    ptr.hs.h_length = std::mem::size_of::<libc::in_addr_t>() as i32;
+
+    // TODO: check is numeric ipv4 in name
+    // TODO: check is current hostname
+    // TODO: check /etc/hosts
+    // TODO: assign ip for name
+
+    Ok(&mut ptr.hs)
+}
+
+const LOCALHOST_B: [u8; 4] = [127, 0, 0, 1];
+pub fn proxyc_getaddrinfo(
+    node: *const c_char,
+    service: *const c_char,
+    hints: *const addrinfo,
+    res: *mut *mut addrinfo,
+) -> c_int {
+    let mut af = libc::AF_INET;
+    let ai_data: *mut AddrinfoData =
+        unsafe { mem::transmute(libc::calloc(1, mem::size_of::<AddrinfoData>() as size_t)) };
+    if ai_data.is_null() {
+        return -1;
+    }
+
+    let ai_buf = unsafe { &mut (*ai_data).ai_buf as *mut addrinfo };
+    let sa_buf = unsafe { &mut (*ai_data).sa_buf as *mut sockaddr_storage };
+
+    unsafe {
+        if !node.is_null() && !contains_numeric_ip(node, sa_buf) {
+            // fail in case inet_aton / inet_pton did not work and AI_NUMERICHOST
+            // // has been set by the caller.
+            if !hints.is_null() && (*hints).ai_flags & libc::AI_NUMERICHOST != 0 {
+                libc::free(ai_data as *mut _);
+                return libc::EAI_NONAME;
+            }
+
+            let mut gh: MaybeUninit<GetHostByNameData> = MaybeUninit::uninit();
+            let hs = proxyc_gethostbyname(node, gh.as_mut_ptr()).unwrap();
+            if !hs.is_null() {
+                let p = *hs;
+                libc::memcpy(
+                    &mut (*(sa_buf as *mut _ as *mut sockaddr_in)).sin_addr as *mut _
+                        as *mut c_void,
+                    *p.h_addr_list as *const c_void,
+                    4,
+                );
+            }
+        } else if !node.is_null() {
+            af = (*(sa_buf as *mut _ as *mut sockaddr_in)).sin_family as i32;
+        } else if node.is_null() && (*hints).ai_flags & libc::AI_PASSIVE != 0 {
+            af = libc::AF_INET;
+            libc::memcpy(
+                &mut (*(sa_buf as *mut _ as *mut sockaddr_in)).sin_addr as *mut _ as *mut c_void,
+                LOCALHOST_B.as_ptr() as *const c_void,
+                4,
+            );
+        }
+    }
+
+    let port: u16 = unsafe {
+        let mut se: *mut servent = std::ptr::null_mut();
+        let mut buf: [u8; 1024] = [0; 1024];
+        let mut se_buf: MaybeUninit<servent> = MaybeUninit::uninit();
+
+        getservbyname_r(
+            service,
+            std::ptr::null(),
+            se_buf.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut c_char,
+            std::mem::size_of_val(&buf),
+            &mut se,
+        );
+
+        se_buf.assume_init();
+        match se.is_null() {
+            false => (*se).s_port as u16,
+            true => {
+                if !service.is_null() {
+                    let tmp = libc::atoi(service) as u16;
+                    tmp.to_be()
+                } else {
+                    0
+                }
+            }
+        }
+    };
+
+    unsafe {
+        match af {
+            libc::AF_INET => {
+                (*(sa_buf as *mut _ as *mut sockaddr_in)).sin_port = port;
+            }
+            _ => {
+                (*(sa_buf as *mut _ as *mut sockaddr_in6)).sin6_port = port;
+            }
+        };
+    }
+
+    unsafe {
+        (*ai_buf).ai_addr = sa_buf as *mut sockaddr;
+
+        (*ai_buf).ai_next = std::ptr::null_mut() as *mut addrinfo;
+        (*sa_buf).ss_family = af as u16;
+        (*ai_buf).ai_family = af;
+        match af {
+            libc::AF_INET => {
+                (*ai_buf).ai_addrlen = std::mem::size_of::<sockaddr_in>() as u32;
+            }
+            _ => (*ai_buf).ai_addrlen = std::mem::size_of::<sockaddr_in6>() as u32,
+        };
+
+        if !hints.is_null() {
+            (*ai_buf).ai_socktype = (*hints).ai_socktype;
+            (*ai_buf).ai_flags = (*hints).ai_flags;
+            (*ai_buf).ai_protocol = (*hints).ai_protocol;
+        } else {
+            (*ai_buf).ai_flags = libc::AI_V4MAPPED | libc::AI_ADDRCONFIG;
+        }
+    }
+
+    unsafe {
+        *res = ai_buf;
+    }
+
+    0
 }

@@ -12,5 +12,10 @@ fn getaddrinfo(
 
     info!("getaddrinfo hooked");
 
-    unsafe { c_getaddrinfo(node, service, hints, res) }
+    let config = &*core::CONFIG;
+    if config.proxy_dns {
+        core::proxyc_getaddrinfo(node, service, hints, res)
+    } else {
+        unsafe { c_getaddrinfo(node, service, hints, res) }
+    }
 }

@@ -5,6 +5,7 @@ authors = ["j3d42 <melvil.guillaume@gmail.com>"]
 edition = "2021"
 
 [dependencies]
+cidr = { version = "0.2", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.5"

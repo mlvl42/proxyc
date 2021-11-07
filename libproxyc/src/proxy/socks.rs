@@ -26,7 +26,7 @@ impl Proxy for Socks4 {
         let _ = packet.write_u8(4); // version
         let _ = packet.write_u8(1); // connect
 
-        // TODO handle auth and proxy dns
+        // TODO proxy dns
 
         match target.ip {
             std::net::IpAddr::V4(addr) => {

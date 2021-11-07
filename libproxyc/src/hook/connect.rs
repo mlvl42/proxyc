@@ -14,7 +14,42 @@ fn check_socket(sock: RawFd, addr: &SockAddr) -> Result<(), Error> {
     if !((fam == (AddressFamily::Inet) || fam == AddressFamily::Inet6)
         && socktype == SockType::Stream)
     {
-        return Err(Error::Generic("bad socket, very bad".into()));
+        // socket is not of the appropriate type
+        return Err(Error::Socket);
+    }
+
+    let config = &*core::CONFIG;
+    if config.ignore_subnets.len() == 0 {
+        return Ok(());
+    }
+
+    // check if the target should be ignored
+    let (target_ip, target_port) = match addr {
+        SockAddr::Inet(x) => {
+            let tmp = x.to_std();
+            Ok((tmp.ip(), tmp.port()))
+        }
+        _ => Err(Error::Socket),
+    }?;
+
+    for i in config.ignore_subnets.iter() {
+        match i.port {
+            Some(p) => {
+                if p == target_port {
+                    return Err(Error::Socket);
+                }
+            }
+            _ => (),
+        };
+
+        match target_ip {
+            std::net::IpAddr::V4(ip) => {
+                if i.cidr.contains(&ip) {
+                    return Err(Error::Socket);
+                }
+            }
+            _ => (),
+        }
     }
 
     Ok(())
@@ -26,6 +61,8 @@ pub fn connect(sock: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
     let addr_opt = unsafe { core::from_libc_sockaddr(address) };
 
     if let Some(addr) = addr_opt {
+        // if the socket is not of the correct type, or the target address
+        // should be ignored, use the true connect call.
         if check_socket(sock, &addr).is_ok() {
             let ns = match socket(addr.family(), SockType::Stream, SockFlag::empty(), None) {
                 Ok(s) => s,
