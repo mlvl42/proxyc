@@ -4,6 +4,7 @@ use std::default::Default;
 use std::fmt;
 use std::io;
 use std::io::Read;
+use std::ops::Not;
 use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
@@ -21,13 +22,18 @@ enum LevelFilterRef {
     Trace,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProxyType {
     Raw,
     Http,
     Socks4,
     Socks5,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Auth {
+    UserPassword(String, String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,6 +63,7 @@ pub struct ProxyConf {
     pub proto: ProxyType,
     pub ip: std::net::IpAddr,
     pub port: u16,
+    pub auth: Option<Auth>,
 }
 
 impl FromStr for ProxyConf {
@@ -88,7 +95,33 @@ impl FromStr for ProxyConf {
             .port()
             .ok_or_else(|| ConfigError::ParseError("missing port".into()))?;
 
-        Ok(ProxyConf { proto, ip, port })
+        let username = url.username().is_empty().not().then(|| url.username());
+        let password = url.password();
+
+        if (username.is_some() || password.is_some())
+            && (proto != ProxyType::Socks5 && proto != ProxyType::Http)
+        {
+            return Err(ConfigError::ParseError(
+                "authentication is only implemented for socks5 and http".into(),
+            ));
+        }
+
+        let auth = match (username, password) {
+            (Some(u), Some(p)) => Some(Auth::UserPassword(u.into(), p.into())),
+            (None, None) => None,
+            _ => {
+                return Err(ConfigError::ParseError(
+                    "unhandled authentication method".into(),
+                ));
+            }
+        };
+
+        Ok(ProxyConf {
+            proto,
+            ip,
+            port,
+            auth,
+        })
     }
 }
 
@@ -106,7 +139,15 @@ impl fmt::Display for ProxyType {
 
 impl fmt::Display for ProxyConf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}://{}:{}", self.proto, self.ip, self.port)
+        if let Some(auth) = &self.auth {
+            match auth {
+                Auth::UserPassword(u, p) => {
+                    write!(f, "{}://{}:{}@{}:{}", self.proto, u, p, self.ip, self.port)
+                }
+            }
+        } else {
+            write!(f, "{}://{}:{}", self.proto, self.ip, self.port)
+        }
     }
 }
 

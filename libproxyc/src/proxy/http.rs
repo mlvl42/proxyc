@@ -3,7 +3,7 @@ use crate::core::CONFIG;
 use crate::error::Error;
 use crate::util::read_timeout;
 use nix::unistd::write;
-use proxyc_common::ProxyConf;
+use proxyc_common::{Auth, ProxyConf};
 use std::io;
 use std::os::unix::io::RawFd;
 
@@ -12,7 +12,7 @@ pub struct Http;
 impl Proxy for Http {
     type E = Error;
 
-    fn connect(sock: RawFd, target: &ProxyConf) -> Result<(), Self::E> {
+    fn connect(sock: RawFd, target: &ProxyConf, _auth: Option<&Auth>) -> Result<(), Self::E> {
         let config = &*CONFIG;
         let ip = match target.ip {
             std::net::IpAddr::V4(addr) => addr.to_string(),

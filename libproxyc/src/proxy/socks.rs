@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::util::read_timeout;
 use byteorder::{BigEndian, WriteBytesExt};
 use nix::unistd::write;
-use proxyc_common::ProxyConf;
+use proxyc_common::{Auth, ProxyConf};
 use std::io;
 use std::io::Write;
 use std::os::unix::io::RawFd;
@@ -19,7 +19,7 @@ pub struct Socks5;
 impl Proxy for Socks4 {
     type E = Error;
 
-    fn connect(sock: RawFd, target: &ProxyConf) -> Result<(), Self::E> {
+    fn connect(sock: RawFd, target: &ProxyConf, _auth: Option<&Auth>) -> Result<(), Self::E> {
         let config = &*CONFIG;
         let mut packet = vec![];
 
@@ -149,17 +149,80 @@ fn read_response(sock: RawFd) -> Result<(), Error> {
     Ok(())
 }
 
+impl Socks5 {
+    fn auth_id(auth: Option<&Auth>) -> u8 {
+        match auth {
+            Some(Auth::UserPassword { .. }) => 2,
+            None => 0,
+        }
+    }
+}
+
 impl Proxy for Socks5 {
     type E = Error;
 
-    fn connect(sock: RawFd, target: &ProxyConf) -> Result<(), Self::E> {
+    fn authenticate(sock: RawFd, auth: Option<&Auth>) -> Result<(), Self::E> {
+        Ok(match auth {
+            Some(Auth::UserPassword(user, password)) => {
+                let config = &*CONFIG;
+                if user.len() < 1 || user.len() > 255 {
+                    return Err(
+                        io::Error::new(io::ErrorKind::InvalidInput, "invalid username").into(),
+                    );
+                };
+                if password.len() < 1 || password.len() > 255 {
+                    return Err(
+                        io::Error::new(io::ErrorKind::InvalidInput, "invalid password").into(),
+                    );
+                }
+
+                let mut packet = [0; 515];
+                let packet_size = 3 + user.len() + password.len();
+                packet[0] = 1; // version
+                packet[1] = user.len() as u8;
+                packet[2..2 + user.len()].copy_from_slice(user.as_bytes());
+                packet[2 + user.len()] = password.len() as u8;
+                packet[3 + user.len()..packet_size].copy_from_slice(password.as_bytes());
+
+                write(sock, &packet[..packet_size])?;
+
+                let mut buf = [0; 2];
+                read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
+
+                if buf[0] != 1 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid response version",
+                    )
+                    .into());
+                }
+                if buf[1] != 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "password authentication failed",
+                    )
+                    .into());
+                }
+            }
+            None => (),
+        })
+    }
+
+    fn connect(sock: RawFd, target: &ProxyConf, auth: Option<&Auth>) -> Result<(), Self::E> {
         let config = &*CONFIG;
 
+        let methods = match target.auth {
+            Some(_) => 2,
+            None => 1,
+        };
+
         let packet = [
-            5, // version
-            1, // methods
-            0, // no auth
+            5,                   // version
+            methods,             // methods
+            Self::auth_id(auth), // method
+            0,                   // always offered
         ];
+
         write(sock, &packet)?;
 
         let mut buf = [0; 2];
@@ -177,6 +240,8 @@ impl Proxy for Socks5 {
         if selected_method == 0xff {
             return Err(io::Error::new(io::ErrorKind::Other, "no acceptable auth method").into());
         }
+
+        Self::authenticate(sock, auth)?;
 
         let mut packet = [0; 264];
         packet[0] = 5; // protocol version

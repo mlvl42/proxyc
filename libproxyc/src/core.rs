@@ -152,11 +152,12 @@ fn chain_start(sock: RawFd, proxy: &ProxyConf) -> Result<(), Error> {
 fn chain_step(sock: RawFd, from: &ProxyConf, to: &ProxyConf) -> Result<(), Error> {
     debug!("chain {} <=> {}", from, to);
 
+    println!("{:?}", to);
     match from.proto {
         ProxyType::Raw => Ok(()),
-        ProxyType::Http => Ok(proxy::Http::connect(sock, to)?),
-        ProxyType::Socks4 => Ok(proxy::Socks4::connect(sock, to)?),
-        ProxyType::Socks5 => Ok(proxy::Socks5::connect(sock, to)?),
+        ProxyType::Http => Ok(proxy::Http::connect(sock, to, from.auth.as_ref())?),
+        ProxyType::Socks4 => Ok(proxy::Socks4::connect(sock, to, from.auth.as_ref())?),
+        ProxyType::Socks5 => Ok(proxy::Socks5::connect(sock, to, from.auth.as_ref())?),
     }
 }
 
@@ -177,6 +178,7 @@ pub fn connect_proxyc(sock: RawFd, ns: RawFd, target: &SockAddr) -> Result<(), E
         proto: ProxyType::Raw,
         ip: target_ip,
         port: target_port,
+        auth: None,
     };
 
     // TODO:
