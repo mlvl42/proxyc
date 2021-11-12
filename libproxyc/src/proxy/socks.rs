@@ -165,6 +165,11 @@ impl Socks5 {
 
 fn find_ip_hostname(ip: IpAddr) -> Option<String> {
     let config = &*CONFIG;
+
+    if !config.proxy_dns {
+        return None;
+    }
+
     let internal_addr = &mut *INTERNALADDR.lock().expect("mutex poisoned");
     if let std::net::IpAddr::V4(addr) = ip {
         let parts = addr.octets();

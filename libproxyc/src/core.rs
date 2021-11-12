@@ -32,12 +32,21 @@ type GetAddrInfoFn = unsafe extern "C" fn(
     res: *mut *mut addrinfo,
 ) -> c_int;
 
+type GetHostByNameFn = unsafe extern "C" fn(name: *const c_char) -> *mut hostent;
+
 pub static CONNECT: Lazy<Option<ConnectFn>> = Lazy::new(|| unsafe {
     std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, cstr!("connect").as_ptr()))
 });
 
 pub static GETADDRINFO: Lazy<Option<GetAddrInfoFn>> = Lazy::new(|| unsafe {
     std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, cstr!("getaddrinfo").as_ptr()))
+});
+
+pub static GETHOSTBYNAME: Lazy<Option<GetHostByNameFn>> = Lazy::new(|| unsafe {
+    std::mem::transmute(libc::dlsym(
+        libc::RTLD_NEXT,
+        cstr!("gethostbyname").as_ptr(),
+    ))
 });
 
 pub static CONFIG: Lazy<ProxycConfig> =
@@ -202,9 +211,7 @@ pub fn connect_proxyc(sock: RawFd, ns: RawFd, target: &SockAddr) -> Result<(), E
         auth: None,
     };
 
-    // TODO:
     // based on the current type strict, dynamic, random etc..
-    // (calc_alive ?)
     // - 1 select proxy from list
     // - 2 start chain
     // - 3 select another proxy from list
@@ -304,12 +311,20 @@ impl InternalIpAddr {
             return Err(Error::Generic("exhausted internal ip addresses".into()));
         }
 
-        // FIXME: flaw here, we will always assign a new IP
+        // if ip addresses have already been assigned,
+        // check if the provided hostname is not already stored
+        if self.idx > 1 {
+            let map = self.table.read().expect("RwLock read poisoned");
+            for i in 1..self.idx {
+                if map.get(&i) == Some(&hn.to_string()) {
+                    return Ok(InternalIpAddr::make_addr(i));
+                }
+            }
+            drop(map);
+        }
+
         let addr = InternalIpAddr::make_addr(self.idx);
-        let mut map = self
-            .table
-            .write()
-            .expect("RwLock issue while acquiring write");
+        let mut map = self.table.write().expect("RwLock write poisoned");
         map.insert(self.idx, hn.to_string());
 
         Ok(addr)
@@ -317,14 +332,14 @@ impl InternalIpAddr {
 }
 
 #[repr(C)]
-struct GetHostByNameData {
+pub struct GetHostByNameData {
     hs: hostent,
     raddr: libc::in_addr_t,
     raddr_p: [*const c_char; 2],
     addr_name: [c_char; 256],
 }
 
-fn proxyc_gethostbyname(
+pub fn proxyc_gethostbyname(
     name: *const c_char,
     gh: *mut GetHostByNameData,
 ) -> Result<*mut hostent, Error> {
@@ -335,8 +350,6 @@ fn proxyc_gethostbyname(
     ptr.hs.h_addr_list = ptr.raddr_p.as_mut_ptr() as *mut *mut i8;
     ptr.hs.h_aliases = ptr.raddr_p[1] as *mut *mut i8;
 
-    // example: assign localhost
-    // ptr.raddr = (0x7f000001 as u32).to_be();
     ptr.raddr = 0;
     ptr.hs.h_addrtype = libc::AF_INET;
     ptr.hs.h_length = std::mem::size_of::<libc::in_addr_t>() as i32;
