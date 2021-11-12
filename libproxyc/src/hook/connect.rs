@@ -54,6 +54,8 @@ pub fn connect(sock: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
     let c_connect = core::CONNECT.expect("Cannot load symbol 'connect'");
     let addr_opt = unsafe { core::from_libc_sockaddr(address) };
 
+    trace!("connect hooked");
+
     if let Some(addr) = addr_opt {
         // if the socket is not of the correct type, or the target address
         // should be ignored, use the true connect call.
@@ -78,17 +80,14 @@ pub fn connect(sock: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
             //}
 
             match core::connect_proxyc(sock, ns, &addr) {
-                Ok(_) => {
-                    info!("connect success");
-                    match fcntl(sock, FcntlArg::F_SETFL(flags_orig)) {
-                        Ok(_) => {
-                            return 0;
-                        }
-                        Err(e) => {
-                            error!("fcntl apply original flags error: {}", e)
-                        }
+                Ok(_) => match fcntl(sock, FcntlArg::F_SETFL(flags_orig)) {
+                    Ok(_) => {
+                        return 0;
                     }
-                }
+                    Err(e) => {
+                        error!("fcntl apply original flags error: {}", e)
+                    }
+                },
                 Err(e) => {
                     close(ns).ok();
                     error!("{}", e);

@@ -8,16 +8,16 @@ static mut GETHOSTBYNAME_DATA: MaybeUninit<core::GetHostByNameData> = MaybeUnini
 fn gethostbyname(name: *const c_char) -> *mut hostent {
     let c_gethostbyname = core::GETHOSTBYNAME.expect("Cannot load symbol 'gethostbyname'");
 
-    info!("gethostbyname hooked");
+    trace!("gethostbyname hooked");
 
     let config = &*core::CONFIG;
     if config.proxy_dns {
         let ptr = unsafe { GETHOSTBYNAME_DATA.as_mut_ptr() };
         match core::proxyc_gethostbyname(name, ptr) {
-            Ok(hs) => return hs,
+            Ok(hs) => hs,
             Err(e) => {
                 error!("{}", e);
-                return std::ptr::null_mut();
+                std::ptr::null_mut()
             }
         }
     } else {

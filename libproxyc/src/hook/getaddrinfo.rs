@@ -10,7 +10,7 @@ fn getaddrinfo(
 ) -> c_int {
     let c_getaddrinfo = core::GETADDRINFO.expect("Cannot load symbol 'getaddrinfo'");
 
-    info!("getaddrinfo hooked");
+    trace!("getaddrinfo hooked");
 
     let config = &*core::CONFIG;
     if config.proxy_dns {

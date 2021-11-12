@@ -32,6 +32,8 @@ type GetAddrInfoFn = unsafe extern "C" fn(
     res: *mut *mut addrinfo,
 ) -> c_int;
 
+type FreeAddrInfoFn = unsafe extern "C" fn(res: *mut addrinfo) -> c_void;
+
 type GetHostByNameFn = unsafe extern "C" fn(name: *const c_char) -> *mut hostent;
 
 pub static CONNECT: Lazy<Option<ConnectFn>> = Lazy::new(|| unsafe {
@@ -47,6 +49,10 @@ pub static GETHOSTBYNAME: Lazy<Option<GetHostByNameFn>> = Lazy::new(|| unsafe {
         libc::RTLD_NEXT,
         cstr!("gethostbyname").as_ptr(),
     ))
+});
+
+pub static FREEADDRINFO: Lazy<Option<FreeAddrInfoFn>> = Lazy::new(|| unsafe {
+    std::mem::transmute(libc::dlsym(libc::RTLD_NEXT, cstr!("freeaddrinfo").as_ptr()))
 });
 
 pub static CONFIG: Lazy<ProxycConfig> =
@@ -380,7 +386,7 @@ pub fn proxyc_getaddrinfo(
     let ai_data: *mut AddrinfoData =
         unsafe { mem::transmute(libc::calloc(1, mem::size_of::<AddrinfoData>() as size_t)) };
     if ai_data.is_null() {
-        return -1;
+        return libc::EAI_MEMORY;
     }
 
     let ai_buf = unsafe { &mut (*ai_data).ai_buf as *mut addrinfo };
@@ -405,6 +411,9 @@ pub fn proxyc_getaddrinfo(
                     *p.h_addr_list as *const c_void,
                     4,
                 );
+            } else {
+                libc::free(ai_data as *mut _);
+                return libc::EAI_NONAME;
             }
         } else if !node.is_null() {
             af = (*(sa_buf as *mut _ as *mut sockaddr_in)).sin_family as i32;
