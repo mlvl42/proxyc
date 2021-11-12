@@ -19,7 +19,7 @@ fn check_socket(sock: RawFd, addr: &SockAddr) -> Result<(), Error> {
     }
 
     let config = &*core::CONFIG;
-    if config.ignore_subnets.len() == 0 {
+    if config.ignore_subnets.is_empty() {
         return Ok(());
     }
 
@@ -33,22 +33,16 @@ fn check_socket(sock: RawFd, addr: &SockAddr) -> Result<(), Error> {
     }?;
 
     for i in config.ignore_subnets.iter() {
-        match i.port {
-            Some(p) => {
-                if p == target_port {
-                    return Err(Error::Socket);
-                }
+        if let Some(p) = i.port {
+            if p == target_port {
+                return Err(Error::Socket);
             }
-            _ => (),
-        };
+        }
 
-        match target_ip {
-            std::net::IpAddr::V4(ip) => {
-                if i.cidr.contains(&ip) {
-                    return Err(Error::Socket);
-                }
+        if let std::net::IpAddr::V4(ip) = target_ip {
+            if i.cidr.contains(&ip) {
+                return Err(Error::Socket);
             }
-            _ => (),
         }
     }
 

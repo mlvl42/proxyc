@@ -14,9 +14,13 @@ use nix::sys::socket::{getsockopt, AddressFamily, InetAddr, IpAddr, SockAddr};
 use nix::unistd::{close, dup2};
 use once_cell::sync::Lazy;
 use proxyc_common::{ChainType, ProxyConf, ProxyType, ProxycConfig};
+use std::collections::HashMap;
+use std::ffi::CStr;
 use std::mem;
 use std::mem::MaybeUninit;
+use std::net::Ipv4Addr;
 use std::os::unix::io::RawFd;
+use std::sync::{Arc, Mutex, RwLock};
 
 type ConnectFn =
     unsafe extern "C" fn(socket: RawFd, address: *const sockaddr, len: socklen_t) -> c_int;
@@ -38,6 +42,9 @@ pub static GETADDRINFO: Lazy<Option<GetAddrInfoFn>> = Lazy::new(|| unsafe {
 
 pub static CONFIG: Lazy<ProxycConfig> =
     Lazy::new(|| ProxycConfig::from_env().expect("failed to parse config"));
+
+pub static INTERNALADDR: Lazy<Mutex<InternalIpAddr>> =
+    Lazy::new(|| Mutex::new(InternalIpAddr::new()));
 
 /// Initiate a connection on a socket
 ///
@@ -257,6 +264,58 @@ fn contains_numeric_ip(node: *const c_char, sa_buf: *mut sockaddr_storage) -> bo
     }
 }
 
+pub struct InternalIpAddr {
+    table: Arc<RwLock<HashMap<u32, String>>>,
+    idx: u32,
+}
+
+impl InternalIpAddr {
+    fn new() -> Self {
+        Self {
+            table: Arc::new(RwLock::new(HashMap::new())),
+            idx: 0,
+        }
+    }
+
+    fn make_addr(idx: u32) -> Ipv4Addr {
+        let config = &*CONFIG;
+        let parts = [
+            config.dns_subnet,
+            ((idx & 0xFF0000) >> 16).try_into().unwrap(),
+            ((idx & 0xFF00) >> 8).try_into().unwrap(),
+            (idx & 0xFF).try_into().unwrap(),
+        ];
+
+        Ipv4Addr::from(parts)
+    }
+
+    pub fn get_hostname(&self, idx: u32) -> Result<String, Error> {
+        let map = self.table.read().expect("Read lock poisoned");
+        let v = map.get(&(idx & 0x00FFFFFF)).ok_or(Error::MissingData)?;
+        Ok(v.to_owned())
+    }
+
+    /// assigns a reserved IP address for the given hostname, if not already
+    /// saved.
+    pub fn assign_addr(&mut self, hn: &str) -> Result<Ipv4Addr, Error> {
+        self.idx += 1;
+
+        if self.idx > 0xFFFFFF {
+            return Err(Error::Generic("exhausted internal ip addresses".into()));
+        }
+
+        // FIXME: flaw here, we will always assign a new IP
+        let addr = InternalIpAddr::make_addr(self.idx);
+        let mut map = self
+            .table
+            .write()
+            .expect("RwLock issue while acquiring write");
+        map.insert(self.idx, hn.to_string());
+
+        Ok(addr)
+    }
+}
+
 #[repr(C)]
 struct GetHostByNameData {
     hs: hostent,
@@ -268,7 +327,7 @@ struct GetHostByNameData {
 fn proxyc_gethostbyname(
     name: *const c_char,
     gh: *mut GetHostByNameData,
-) -> Result<*mut hostent, std::io::Error> {
+) -> Result<*mut hostent, Error> {
     let mut ptr = unsafe { &mut *gh };
     ptr.raddr_p[0] = &ptr.raddr as *const _ as *const c_char;
     ptr.raddr_p[1] = std::ptr::null();
@@ -286,6 +345,13 @@ fn proxyc_gethostbyname(
     // TODO: check is current hostname
     // TODO: check /etc/hosts
     // TODO: assign ip for name
+    let internal_addr = &mut *INTERNALADDR.lock().expect("mutex poisoned");
+
+    let ns = unsafe { CStr::from_ptr(name) };
+    let ns = ns.to_str().unwrap();
+    let raddr = internal_addr.assign_addr(ns)?;
+    let tmp: u32 = raddr.into();
+    ptr.raddr = tmp.to_be();
 
     Ok(&mut ptr.hs)
 }
@@ -344,22 +410,23 @@ pub fn proxyc_getaddrinfo(
         let mut buf: [u8; 1024] = [0; 1024];
         let mut se_buf: MaybeUninit<servent> = MaybeUninit::uninit();
 
-        getservbyname_r(
-            service,
-            std::ptr::null(),
-            se_buf.as_mut_ptr(),
-            buf.as_mut_ptr() as *mut c_char,
-            std::mem::size_of_val(&buf),
-            &mut se,
-        );
+        if !service.is_null() {
+            getservbyname_r(
+                service,
+                std::ptr::null(),
+                se_buf.as_mut_ptr(),
+                buf.as_mut_ptr() as *mut c_char,
+                std::mem::size_of_val(&buf),
+                &mut se,
+            );
+        }
 
         se_buf.assume_init();
         match se.is_null() {
             false => (*se).s_port as u16,
             true => {
                 if !service.is_null() {
-                    let tmp = libc::atoi(service) as u16;
-                    tmp.to_be()
+                    (libc::atoi(service) as u16).to_be()
                 } else {
                     0
                 }

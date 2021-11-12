@@ -1,5 +1,5 @@
 use super::Proxy;
-use crate::core::CONFIG;
+use crate::core::{CONFIG, INTERNALADDR};
 use crate::error::Error;
 use crate::util::read_timeout;
 use byteorder::{BigEndian, WriteBytesExt};
@@ -7,14 +7,11 @@ use nix::unistd::write;
 use proxyc_common::{Auth, ProxyConf};
 use std::io;
 use std::io::Write;
+use std::net::IpAddr;
 use std::os::unix::io::RawFd;
 
 pub struct Socks4;
 pub struct Socks5;
-
-// TODO:
-// - create specific socks error
-// - stop using global CONFIG
 
 impl Proxy for Socks4 {
     type E = Error;
@@ -25,8 +22,6 @@ impl Proxy for Socks4 {
 
         let _ = packet.write_u8(4); // version
         let _ = packet.write_u8(1); // connect
-
-        // TODO proxy dns
 
         match target.ip {
             std::net::IpAddr::V4(addr) => {
@@ -85,6 +80,16 @@ impl Proxy for Socks4 {
 
         Ok(())
     }
+}
+
+fn write_hostname(mut packet: &mut [u8], target: &ProxyConf, hn: String) -> Result<usize, Error> {
+    let start_len = packet.len();
+    let hn_len: u8 = hn.len().try_into().unwrap();
+    packet.write_u8(3).unwrap(); // dns
+    packet.write_u8(hn_len).unwrap();
+    packet.write_all(hn.as_bytes()).unwrap();
+    packet.write_u16::<BigEndian>(target.port).unwrap();
+    Ok(start_len - packet.len())
 }
 
 fn write_addr(mut packet: &mut [u8], target: &ProxyConf) -> Result<usize, Error> {
@@ -158,54 +163,59 @@ impl Socks5 {
     }
 }
 
+fn find_ip_hostname(ip: IpAddr) -> Option<String> {
+    let config = &*CONFIG;
+    let internal_addr = &mut *INTERNALADDR.lock().expect("mutex poisoned");
+    if let std::net::IpAddr::V4(addr) = ip {
+        let parts = addr.octets();
+        let idx: u32 = addr.into();
+        if parts[0] == config.dns_subnet {
+            return internal_addr.get_hostname(idx).ok();
+        }
+    }
+    None
+}
+
 impl Proxy for Socks5 {
     type E = Error;
 
     fn authenticate(sock: RawFd, auth: Option<&Auth>) -> Result<(), Self::E> {
-        Ok(match auth {
-            Some(Auth::UserPassword(user, password)) => {
-                let config = &*CONFIG;
-                if user.len() < 1 || user.len() > 255 {
-                    return Err(
-                        io::Error::new(io::ErrorKind::InvalidInput, "invalid username").into(),
-                    );
-                };
-                if password.len() < 1 || password.len() > 255 {
-                    return Err(
-                        io::Error::new(io::ErrorKind::InvalidInput, "invalid password").into(),
-                    );
-                }
-
-                let mut packet = [0; 515];
-                let packet_size = 3 + user.len() + password.len();
-                packet[0] = 1; // version
-                packet[1] = user.len() as u8;
-                packet[2..2 + user.len()].copy_from_slice(user.as_bytes());
-                packet[2 + user.len()] = password.len() as u8;
-                packet[3 + user.len()..packet_size].copy_from_slice(password.as_bytes());
-
-                write(sock, &packet[..packet_size])?;
-
-                let mut buf = [0; 2];
-                read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
-
-                if buf[0] != 1 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "invalid response version",
-                    )
-                    .into());
-                }
-                if buf[1] != 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "password authentication failed",
-                    )
-                    .into());
-                }
+        if let Some(Auth::UserPassword(user, password)) = auth {
+            let config = &*CONFIG;
+            if user.is_empty() || user.len() > 255 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid username").into());
+            };
+            if password.is_empty() || password.len() > 255 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid password").into());
             }
-            None => (),
-        })
+
+            let mut packet = [0; 515];
+            let packet_size = 3 + user.len() + password.len();
+            packet[0] = 1; // version
+            packet[1] = user.len() as u8;
+            packet[2..2 + user.len()].copy_from_slice(user.as_bytes());
+            packet[2 + user.len()] = password.len() as u8;
+            packet[3 + user.len()..packet_size].copy_from_slice(password.as_bytes());
+
+            write(sock, &packet[..packet_size])?;
+
+            let mut buf = [0; 2];
+            read_timeout(sock, &mut buf, config.tcp_read_timeout)?;
+
+            if buf[0] != 1 {
+                return Err(
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid response version").into(),
+                );
+            }
+            if buf[1] != 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "password authentication failed",
+                )
+                .into());
+            }
+        }
+        Ok(())
     }
 
     fn connect(sock: RawFd, target: &ProxyConf, auth: Option<&Auth>) -> Result<(), Self::E> {
@@ -248,9 +258,20 @@ impl Proxy for Socks5 {
         packet[1] = 1; // connect
         packet[2] = 0; // reserved
 
-        // write address
-        let len = write_addr(&mut packet[3..], target)?;
-        write(sock, &packet[..len + 3])?;
+        let hnret = find_ip_hostname(target.ip);
+
+        match hnret {
+            Some(hn) => {
+                // write address
+                let len = write_hostname(&mut packet[3..], target, hn)?;
+                write(sock, &packet[..len + 3])?;
+            }
+            None => {
+                // write address
+                let len = write_addr(&mut packet[3..], target)?;
+                write(sock, &packet[..len + 3])?;
+            }
+        }
 
         // read response + address on success
         read_response(sock)?;
