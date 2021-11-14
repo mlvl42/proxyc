@@ -235,7 +235,6 @@ impl Proxy for Socks5 {
             5,                   // version
             methods,             // methods
             Self::auth_id(auth), // method
-            0,                   // always offered
         ];
 
         write(sock, &packet)?;

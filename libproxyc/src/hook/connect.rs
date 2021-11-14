@@ -68,16 +68,16 @@ pub fn connect(sock: RawFd, address: *const sockaddr, len: socklen_t) -> c_int {
             // store original flags set by caller.
             // we will mess with it later and thus need to reset it before
             // returning.
-            let flags = match fcntl(sock, FcntlArg::F_GETFL) {
+            let mut flags = match fcntl(sock, FcntlArg::F_GETFL) {
                 Ok(f) => OFlag::from_bits_truncate(f),
                 Err(_) => return -1,
             };
             let flags_orig = flags;
 
-            //if flags.contains(OFlag::O_NONBLOCK) {
-            //    flags.toggle(OFlag::O_NONBLOCK);
-            //    fcntl(sock, FcntlArg::F_SETFL(flags)).expect("fcntl force blocking failed");
-            //}
+            if flags.contains(OFlag::O_NONBLOCK) {
+                flags.toggle(OFlag::O_NONBLOCK);
+                fcntl(sock, FcntlArg::F_SETFL(flags)).expect("fcntl force blocking failed");
+            }
 
             match core::connect_proxyc(sock, ns, &addr) {
                 Ok(_) => match fcntl(sock, FcntlArg::F_SETFL(flags_orig)) {
