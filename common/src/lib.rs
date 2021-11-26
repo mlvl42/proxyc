@@ -1,10 +1,12 @@
 use cidr::Ipv4Cidr;
 use log::LevelFilter;
-use serde::{Deserialize, Serialize};
+use serde::de::{self, DeserializeSeed};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::default::Default;
 use std::fmt;
 use std::io;
 use std::io::Read;
+use std::marker::PhantomData;
 use std::ops::Not;
 use std::path::Path;
 use std::str::FromStr;
@@ -183,7 +185,7 @@ pub struct IgnoreSubnet {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProxycConfig {
-    #[serde(rename = "proxy")]
+    #[serde(rename = "proxy", deserialize_with = "seq_string_or_struct")]
     pub proxies: Vec<ProxyConf>,
     pub chain_type: ChainType,
     #[serde(with = "LevelFilterRef")]
@@ -231,4 +233,81 @@ impl Default for ProxycConfig {
             ignore_subnets: vec![],
         }
     }
+}
+
+/// Either deserializes a vec of structs or a vec of strings.
+fn seq_string_or_struct<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    T: Deserialize<'de> + FromStr<Err = ConfigError>,
+    D: Deserializer<'de>,
+{
+    struct StringOrStruct<T>(PhantomData<T>);
+
+    impl<'de, T> de::Visitor<'de> for StringOrStruct<T>
+    where
+        T: Deserialize<'de> + FromStr<Err = ConfigError>,
+    {
+        type Value = T;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("string or map")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<T, E>
+        where
+            E: de::Error,
+        {
+            FromStr::from_str(value).map_err(de::Error::custom)
+        }
+
+        fn visit_map<M>(self, map: M) -> Result<T, M::Error>
+        where
+            M: de::MapAccess<'de>,
+        {
+            Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
+        }
+    }
+
+    // This is a common trick that enables passing a Visitor to the
+    // `seq.next_element` call below.
+    impl<'de, T> DeserializeSeed<'de> for StringOrStruct<T>
+    where
+        T: Deserialize<'de> + FromStr<Err = ConfigError>,
+    {
+        type Value = T;
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_any(self)
+        }
+    }
+
+    struct SeqStringOrStruct<T>(PhantomData<T>);
+
+    impl<'de, T> de::Visitor<'de> for SeqStringOrStruct<T>
+    where
+        T: Deserialize<'de> + FromStr<Err = ConfigError>,
+    {
+        type Value = Vec<T>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("sequence of strings or maps")
+        }
+
+        fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+        where
+            S: de::SeqAccess<'de>,
+        {
+            let mut vec = Vec::new();
+            // Tell it which Visitor to use by passing one in.
+            while let Some(element) = seq.next_element_seed(StringOrStruct(PhantomData))? {
+                vec.push(element);
+            }
+            Ok(vec)
+        }
+    }
+
+    deserializer.deserialize_seq(SeqStringOrStruct(PhantomData))
 }

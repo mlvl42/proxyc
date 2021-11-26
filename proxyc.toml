@@ -3,13 +3,14 @@ log_level = "debug"
 # [[ignore_subnets]]
 # cidr = "128.0.0.0/24"
 
-[[proxy]]
-type = "socks5"
-ip = "127.0.0.1"
-port = 1080
-# auth = { UserPassword = { 0 = "username", 1 = "password" } }
+proxy = [
+	"socks5://127.0.0.1:1080",
+	"socks5://98.175.31.195:4145",
+]
 
+# alternate way of defining a list of proxies
 # [[proxy]]
-# type = "http"
+# type = "socks5"
 # ip = "127.0.0.1"
-# port = 8888
+# port = 1080
+# auth = { UserPassword = { 0 = "username", 1 = "password" } }

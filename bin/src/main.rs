@@ -11,7 +11,7 @@ use structopt::StructOpt;
 #[derive(StructOpt, Debug)]
 #[structopt(
     name = "proxyc",
-    about = "proxychains something something",
+    about = "proxy chaining tool",
     setting = AppSettings::TrailingVarArg
 )]
 struct ProxycOpt {
