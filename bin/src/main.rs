@@ -23,6 +23,10 @@ struct ProxycOpt {
     #[structopt(rename_all = "lowercase", short, long)]
     log_level: Option<LevelFilter>,
 
+    /// suppress output (same as --log-level off)
+    #[structopt(short, long)]
+    quiet: bool,
+
     /// chain type
     #[structopt(short, long)]
     chain: Option<ChainType>,
@@ -96,7 +100,9 @@ fn main() -> Result<()> {
             config.proxies = opts.proxy;
         }
 
-        if let Some(level) = opts.log_level {
+        if opts.quiet {
+            config.log_level = LevelFilter::Off;
+        } else if let Some(level) = opts.log_level {
             config.log_level = level;
         }
 
