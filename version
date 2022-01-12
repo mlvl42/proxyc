@@ -1,0 +1,29 @@
+#!/bin/bash -eu
+
+set -o pipefail
+
+# generate a unique version string
+# see https://wiki.archlinux.org/index.php/VCS_package_guidelines#Git for inspiration
+
+version() {
+  # reuses most recent tag and count commit from it, or use 0 as major version
+  # and count all commits always append commit hash
+  git describe --long --tags 2>/dev/null | sed 's/\([^-]*-g\)/r\1/;s/-/./g' ||
+    printf "0.r%s.g%s" "$(git rev-list --count HEAD)" "$(commit_hash)"
+}
+
+commit_hash()  {
+  git rev-parse --short HEAD
+}
+
+branch() {
+  git branch --show-current 2> /dev/null || git rev-parse --abbrev-ref HEAD
+}
+
+branch="$(branch)"
+if [ "${branch}" ] && [ "${branch}" != "HEAD" ]
+then
+  echo "$(version)-${branch}"
+else
+  echo "$(version)"
+fi
