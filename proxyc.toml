@@ -1,16 +1,40 @@
+# defines the verbosity: off, trace, debug, info, warn of error
 log_level = "debug"
 
-# [[ignore_subnets]]
-# cidr = "128.0.0.0/24"
+# connect calls matching this range won't be proxied.
+#[[ignore_subnets]]
+#cidr = "128.0.0.0/24"
 
+# whether dns should be proxied or not.
+proxy_dns = true
+
+# if the proxified application issues a DNS request, we return an IP address
+# from this range.
+#dns_subnet = 224
+
+# list of available proxies
 proxy = [
 	"socks5://127.0.0.1:1080",
-	"socks5://98.175.31.195:4145",
 ]
 
+# how the list of proxies should be treated.
+# strict: connect successively through each proxies (default).
+# dynamic: not implemented.
+# random:  not implemented.
+chain_type = "strict"
+
+# examples with more options
+# available protocols: raw, http, https, socks4, socks5
+#proxy = [
+#  "socks4://1.2.3.4:4242",
+#  "socks5://user:pass@1.1.1.1:1081",
+#  "http://1.1.1.1:80",
+#  "raw://1.1.1.1:80",
+#]
+
 # alternate way of defining a list of proxies
-# [[proxy]]
-# type = "socks5"
-# ip = "127.0.0.1"
-# port = 1080
-# auth = { UserPassword = { 0 = "username", 1 = "password" } }
+#[[proxy]]
+#type = "socks5"
+#ip = "127.0.0.1"
+#port = 1080
+#auth = { UserPassword = { 0 = "username", 1 = "password" } }
