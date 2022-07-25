@@ -16,7 +16,7 @@ LD_PRELOAD. It is heavily inspired by https://github.com/rofl0r/proxychains-ng.
 > chaining tool, consider using [one](https://github.com/haad/proxychains)
 > of the [popular](https://github.com/rofl0r/proxychains-ng) choices.
 >
-> Since this projects relies on hooking function calls via LD_PRELOAD, it will
+> Since this project relies on hooking function calls via LD_PRELOAD, it will
 > only work with dynamically linked programs.
 
 ## Installation
