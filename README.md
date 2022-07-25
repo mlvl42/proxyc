@@ -12,17 +12,33 @@ LD_PRELOAD. It is heavily inspired by https://github.com/rofl0r/proxychains-ng.
 
 > **WARNINGS**:
 > I am writing and building this project in order to learn Rust, bugs and
-> issues are expected to occur. Should you want to use a proxy chaining utility
-> for serious activities, consider using [one](https://github.com/haad/proxychains)
+> issues are expected to occur. Should you want to use a more mature proxy
+> chaining tool, consider using [one](https://github.com/haad/proxychains)
 > of the [popular](https://github.com/rofl0r/proxychains-ng) choices.
 >
-> Moreover, remember that this project only works with dynamically linked
-> programs.
+> Since this projects relies on hooking function calls via LD_PRELOAD, it will
+> only work with dynamically linked programs.
 
 ## Installation
 
-FIXME: cargo install is just for binary crates, however our program also needs
-the libproxyc.so to work.
+### Source
+
+This project requires the rust tool chain in order to be compiled, see the
+[rust website](https://www.rust-lang.org/tools/install) for more information.
+Run the following commands to build and install the project.
+
+```bash
+$ make
+$ sudo make install
+```
+
+For development purposes, run `cargo build` at the root of the repository to create development
+binaries and libs. Debug builds of `proxyc` will inject the library located under
+`target/debug`.
+
+### Arch Linux
+
+TODO
 
 ## Usage
 
@@ -39,7 +55,7 @@ $ proxyc curl "https://ipinfo.io/what-is-my-ip"
 ```
 
 However, all the configuration options can be specified as command line
-arguments. For instance, the list of proxies to use can be expressed this way:
+arguments. For instance, the list of proxies can be expressed in such a way:
 
 ```
 $ proxyc --proxy "socks5://127.0.0.1:1080" --proxy "socks4://127.0.0.1:1081" smbclient.py 'test.local/user:pass@SHARE'
