@@ -91,6 +91,10 @@ proxy = [
 # random:  not implemented.
 chain_type = "strict"
 
+# connect and read timeout in milliseconds.
+# tcp_connect_timeout = 8000
+# tcp_read_timeout = 15000
+
 # examples with more options
 # available protocols: raw, http, https, socks4, socks5
 #proxy = [

@@ -131,10 +131,6 @@ pub fn timed_connect(fd: RawFd, addr: &SockAddr, timeout: usize) -> Result<(), E
 ///
 /// Supports only the following address families: Inet (v4 & v6)
 /// Returns None for unsupported families.
-///
-/// # Safety
-///
-/// unsafe because it takes a raw pointer as argument.
 pub unsafe fn from_libc_sockaddr(addr: *const libc::sockaddr) -> Option<SockAddr> {
     if addr.is_null() {
         None
@@ -395,7 +391,7 @@ pub fn proxyc_getaddrinfo(
     unsafe {
         if !node.is_null() && !contains_numeric_ip(node, sa_buf) {
             // fail in case inet_aton / inet_pton did not work and AI_NUMERICHOST
-            // // has been set by the caller.
+            // has been set by the caller.
             if !hints.is_null() && (*hints).ai_flags & libc::AI_NUMERICHOST != 0 {
                 libc::free(ai_data as *mut _);
                 return libc::EAI_NONAME;

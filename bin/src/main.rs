@@ -15,35 +15,35 @@ use structopt::StructOpt;
     setting = AppSettings::TrailingVarArg
 )]
 struct ProxycOpt {
-    /// proxy definition
+    /// Proxy config list
     #[structopt(short, long, require_delimiter = true)]
     proxy: Vec<ProxyConf>,
 
-    /// log level
+    /// Log level
     #[structopt(rename_all = "lowercase", short, long)]
     log_level: Option<LevelFilter>,
 
-    /// suppress output (same as --log-level off)
+    /// Suppress output (same as --log-level off)
     #[structopt(short, long)]
     quiet: bool,
 
-    /// chain type
+    /// Chain type
     #[structopt(short, long)]
     chain: Option<ChainType>,
 
-    /// custom path to config file
+    /// Custom path to config file
     #[structopt(short, long, parse(from_os_str))]
     file_config: Option<PathBuf>,
 
-    /// read timeout
-    #[structopt(long)]
+    /// Read timeout
+    #[structopt(long = "tr")]
     tcp_read_timeout: Option<usize>,
 
-    /// connect timeout
-    #[structopt(long)]
+    /// Connect timeout
+    #[structopt(long = "tc")]
     tcp_connect_timeout: Option<usize>,
 
-    /// the command line to hook
+    /// Program and args to hook
     args: Vec<String>,
 }
 
