@@ -55,7 +55,12 @@ impl FromStr for ChainType {
             "strict" => ChainType::Strict,
             "dynamic" => ChainType::Dynamic,
             "random" => ChainType::Random,
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "invalid chain type")),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("invalid chain type: {}", s),
+                ))
+            }
         })
     }
 }
