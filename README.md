@@ -10,7 +10,7 @@ penetration tests in order to bounce
 This program hooks the libc network functions by injecting a shared library via
 LD_PRELOAD. It is heavily inspired by https://github.com/rofl0r/proxychains-ng.
 
-> **WARNINGS**:
+> **WARNING**:
 > I am writing and building this project in order to learn Rust, bugs and
 > issues are expected to occur. Should you want to use a more mature proxy
 > chaining tool, consider using [one](https://github.com/haad/proxychains)
