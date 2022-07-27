@@ -6,11 +6,11 @@ use nix::unistd::read;
 use std::os::unix::io::RawFd;
 use std::time::Instant;
 
-pub fn poll_retry(mut fds: &mut [PollFd], timeout: usize) -> Result<i32, Error> {
+pub fn poll_retry(fds: &mut [PollFd], timeout: usize) -> Result<i32, Error> {
     let now = Instant::now();
     let mut remaining: i32 = timeout.try_into().unwrap();
     loop {
-        let ret = poll(&mut fds, remaining);
+        let ret = poll(fds, remaining);
         let elapsed = now.elapsed().as_millis();
         remaining = remaining
             .checked_sub(elapsed.try_into().unwrap())
