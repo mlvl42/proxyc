@@ -73,7 +73,7 @@ See the program help for more information.
 ## Sample configuration
 
 ```toml
-# defines the verbosity: off, trace, debug, info, warn of error
+# defines the verbosity: off, trace, debug, info, warn or error
 log_level = "debug"
 
 # connect calls matching this range won't be proxied.
