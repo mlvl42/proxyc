@@ -2,6 +2,7 @@ use crate::core;
 use nix::libc::{c_char, hostent};
 use std::mem::MaybeUninit;
 
+// The man page of gehostbyname states that it can return static data.
 static mut GETHOSTBYNAME_DATA: MaybeUninit<core::GetHostByNameData> = MaybeUninit::uninit();
 
 #[no_mangle]

@@ -218,19 +218,29 @@ pub fn connect_proxyc(sock: RawFd, ns: RawFd, target: &SockAddr) -> Result<(), E
     // - 2 start chain
     // - 3 select another proxy from list
     // - 4 tunnel previous to this one
-    // - 5 repeat 3
+    // - 5 repeat step 3
     // - 6 connect to target
     let new_sock = match config.chain_type {
         ChainType::Strict => {
             // start the chain by connecting to the first proxy
-            chain_start(ns, config.proxies.first().unwrap())?;
+            chain_start(
+                ns,
+                config
+                    .proxies
+                    .first()
+                    .expect("chain_start: empty proxy list"),
+            )?;
 
             // chain each proxy ends
             for w in config.proxies.windows(2) {
                 chain_step(ns, &w[0], &w[1])?;
             }
             // chain the target
-            chain_step(ns, config.proxies.last().unwrap(), &target_conf)?;
+            chain_step(
+                ns,
+                config.proxies.last().expect("chain_step: empty proxy list"),
+                &target_conf,
+            )?;
 
             Ok(ns)
         }
@@ -334,6 +344,9 @@ impl InternalIpAddr {
 }
 
 #[repr(C)]
+/// Wraps all the fields necessary for the init of a hostent by gethostbyname.
+/// This removes the need of allocating other variables as the resulting
+/// hostent's fields will point inside this wrapper.
 pub struct GetHostByNameData {
     hs: hostent,
     raddr: libc::in_addr_t,
@@ -360,13 +373,16 @@ pub fn proxyc_gethostbyname(
     // TODO: check is current hostname
     // TODO: check /etc/hosts
     // TODO: assign ip for name
-    let internal_addr = &mut *INTERNALADDR.lock().expect("mutex poisoned");
 
-    let ns = unsafe { CStr::from_ptr(name) };
-    let ns = ns.to_str().unwrap();
-    let raddr = internal_addr.assign_addr(ns)?;
-    let tmp: u32 = raddr.into();
-    ptr.raddr = tmp.to_be();
+    let raddr: u32 = {
+        let ns = unsafe { CStr::from_ptr(name) };
+        let ns = ns.to_str().unwrap();
+        let internal_addr = &mut *INTERNALADDR.lock().expect("mutex poisoned");
+        let addr = internal_addr.assign_addr(ns)?;
+        addr.into()
+    };
+
+    ptr.raddr = raddr.to_be();
 
     Ok(&mut ptr.hs)
 }
