@@ -54,14 +54,21 @@ $ proxyc curl "https://ipinfo.io/what-is-my-ip"
 - /etc/proxyc/proxyc.toml
 ```
 
-However, all the configuration options can be specified as command line
-arguments. For instance, the list of proxies can be expressed in such a way:
+Additionally, a specific configuration file may be explicitly passed to `proxyc`:
+```
+$ proxyc -f ./proxyc.toml smbclient.py 'test.local/user:pass@SHARE'
+```
+
+Furthermore, all configuration options are available as command line
+arguments. For instance, the list of proxies could be expressed in such a way:
 
 ```
 $ proxyc --proxy "socks5://127.0.0.1:1080" --proxy "socks4://127.0.0.1:1081" smbclient.py 'test.local/user:pass@SHARE'
 # or comma separated
 $ proxyc -p "socks5://127.0.0.1:1080,socks4://127.0.0.1:1081" smbclient.py 'test.local/user:pass@SHARE'
 ```
+
+See the program help for more information.
 
 ## Sample configuration
 
