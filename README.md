@@ -5,7 +5,7 @@
 Simply prepend your commands with this utility, define a list of SOCKS, HTTP or
 raw proxies you wish to use and watch all the network traffic be automatically
 relayed through each proxies. This kind of tool is very useful during internal
-penetration tests in order to bounce
+penetration tests in order to bounce between servers.
 
 This program hooks the libc network functions by injecting a shared library via
 LD_PRELOAD. It is heavily inspired by https://github.com/rofl0r/proxychains-ng.
